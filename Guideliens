@@ -1,0 +1,26 @@
+Data Enities defined correctly
+
+Entities must aligned to Concepts in Data Concept Model
+Names should be according GDM Standards, synonyms are resolved to minimize the risk of duplciation
+Descriptions that are complete & unambigious using sub concepts specilaizations and data collections wiseley to limit the proliferation of dataproducts to ensure they remain discoverable
+Primary Keys are estiblised as per guidance in concept Model
+
+Data Attribes defined and mapped correctly
+
+Each Attributes are uniquely named, if existing in another entity should have same definition
+Data attributes that are similar but different needs to have much clear descriptins to differesiate them
+Description are complete and unamigous
+data types and field lenghts and attributes should be defined and consistent 
+Enable contor for personal  or personal information
+
+
+Completemness of Data Model
+
+GDM Should be complete representatnle of data contained in Foundation Data Producst
+
+Any data attribute should be masterd once and once only within the foundation data product layer
+Ideally all attributes of an entity should be included and described However if this is not possile then as a mininum attributes descrived should be include the primary of the entity all forgiegn kjeys all attribues that are intended or have the potential for resuse
+
+Calculated attributes that have potenton of resue should be inclued in the group data model
+
+Where interoperable keys are defined at an enterprise level these should be used all data products of that type i.e. account and arrangement data prudct should share the common key of portfolio identifier

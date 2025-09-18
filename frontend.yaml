@@ -1,0 +1,18 @@
+substitutions:
+  _REGION: "us-central1"
+  _PROJECT_ID: "r2d2-00"         
+  _IMAGE_NAME: "gdm-frontend"
+  _TAG: "latest"
+
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/usecases/${_IMAGE_NAME}:${_TAG}'
+      - '-f'
+      - 'frontend/Dockerfile'  # Specify the path to the Dockerfile
+      - '.'                    # Set the build context to the project root
+
+images:
+  - '${_REGION}-docker.pkg.dev/${_PROJECT_ID}/usecases/${_IMAGE_NAME}:${_TAG}'

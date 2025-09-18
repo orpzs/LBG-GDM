@@ -1,0 +1,30 @@
+Section,Question / Requirement,Response / Details,Notes / Examples
+General,ODP Name,,"Propose a descriptive name, e.g., Salesforce_Account_ODP"
+General,Requestor(s),,Name and Team of the person/group requesting the data.
+General,Date of Request,,YYYY-MM-DD
+1. Business Justification,Business Objective,,What business problem does this solve or what opportunity does it enable?
+1. Business Justification,Key Questions to Answer,,List the top 3-5 business questions you intend to answer with this data.
+1. Business Justification,Primary Audience,,"Which teams, roles, or applications will use this data? e.g., Sales Ops, Marketing Dashboard."
+1. Business Justification,Success Metrics,,"How will we measure the impact of this ODP? e.g., Reduced reporting time by X hours."
+2. Source System,Source System Name,,"e.g., Salesforce, SAP, PostgreSQL customer_db, Zendesk API."
+2. Source System,Specific Data Objects,,"Name the exact tables, views, or API endpoints."
+2. Source System,Source System Owner,,The primary technical contact for the source system.
+2. Source System,Data Dictionary / Docs,,Provide a link or attachment if a data dictionary exists.
+2. Source System,Data Volume (Rows),,Approximate current number of rows.
+2. Source System,Data Growth Rate,,Estimated new rows per day/week/month.
+2. Source System,Unique Identifiers,,Which column(s) act as the primary key?
+2. Source System,Change Detection Column,,Is there a last_modified_date or updated_at timestamp?
+3. Ingestion & Refresh,Refresh Frequency,,"How often does the data need to be updated? e.g., Hourly, Daily at 6 AM UTC."
+3. Ingestion & Refresh,Acceptable Latency,,"What is the maximum acceptable data delay? e.g., Data must be available by 9 AM."
+3. Ingestion & Refresh,Historical Data Load,,Do we need a one-time load of all historical data? Any date ranges?
+3. Ingestion & Refresh,Source System Constraints,,Are there API rate limits or specific times to avoid querying?
+4. Access & Security,Overall Data Classification,,"Public, Internal, Confidential, or Restricted/PII."
+4. Access & Security,Sensitive Columns,,"List any columns containing PII or other sensitive data. e.g., email, phone_number."
+4. Access & Security,Anonymization Needs,,"Do any columns need to be masked or hashed? If so, which ones?"
+4. Access & Security,Default Access Roles,,Which teams/roles should have read access by default?
+5. Metadata & Quality,ODP Description,,"Provide a clear, business-friendly description of the dataset."
+5. Metadata & Quality,Key Column Definitions,,"Define the 5-10 most important columns. e.g., ARR: Annual Recurring Revenue."
+5. Metadata & Quality,Discoverability Tags,,"List keywords to help users find this data. e.g., sales, customer, finance."
+5. Metadata & Quality,Data Steward,,Who is the official business owner accountable for this data's definition and quality?
+5. Metadata & Quality,Known Quality Issues,,"List any known issues. e.g., country field is often null."
+5. Metadata & Quality,Critical Quality Checks,,"What are the essential validation rules? e.g., Primary key must never be null."
