@@ -96,7 +96,7 @@ def setup_pages() -> None:
     # st.header("Network HLD Assitant")
     pg = st.navigation([st.Page("pages/data_model_review.py", title="Data Model Review", icon=":material/pageview:"),
                         st.Page("pages/load_entities.py", title="Load Data Model Entities", icon=":material/upload_file:"),
-                        #st.Page("pages/home.py", title="Home", icon=":material/home:"), 
+                        st.Page("pages/define_guidelines.py", title="Define Guidelines", icon=":material/rule:"), 
                         # st.Page("pages/tdd_generate.py", title="Generation Assistant", icon=":material/description:"),
                         # st.Page("pages/generate_config_files.py", title="Config Generator", icon=":material/settings_applications:"),
 

@@ -1,4 +1,3 @@
-
 import streamlit as st, pandas as pd
 from google.cloud import bigquery
 from google.api_core.exceptions import NotFound
@@ -202,3 +201,149 @@ def insert_entity_to_bq(project_id: str, dataset_id: str, table_name: str, entit
     except Exception as e:
         st.error(f"An error occurred during the BigQuery MERGE operation: {e}")
         return False
+
+
+def get_all_xml_blocks(project_id: str, dataset_id: str, table_name: str) -> pd.DataFrame:
+    """Fetches all XML blocks from the specified BigQuery table."""
+    client = get_bq_client()
+    if not client:
+        st.error("BigQuery client not available.")
+        return pd.DataFrame()
+
+    table_id = f"{project_id}.{dataset_id}.{table_name}"
+    query = f"SELECT complex_type_name, xml_block FROM `{table_id}`"
+
+    try:
+        query_job = client.query(query)
+        df = query_job.to_dataframe()
+        return df
+    except Exception as e:
+        # If the table doesn't exist, return an empty DataFrame
+        if "Not found: Table" in str(e):
+            return pd.DataFrame(columns=['complex_type_name', 'xml_block'])
+        st.error(f"Failed to fetch XML blocks from BigQuery: {e}")
+        return pd.DataFrame()
+
+def get_guidelines_table_id():
+    """Constructs the full BigQuery table ID for guidelines."""
+    project_id = st.session_state.get("project_id", "default-project")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    table_name = st.session_state.get("guidelines_bq_table", "guidelines")
+    return f"{project_id}.{dataset_id}.{table_name}"
+
+def create_guidelines_table_if_not_exists():
+    """Creates the guidelines table in BigQuery if it doesn't already exist."""
+    client = get_bq_client()
+    if not client:
+        return
+
+    table_id = get_guidelines_table_id()
+    try:
+        client.get_table(table_id)
+    except NotFound:
+        st.toast(f"Creating BigQuery table for guidelines: {table_id}")
+        schema = [
+            bigquery.SchemaField("guideline_id", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("guideline_text", "STRING", mode="REQUIRED"),
+            bigquery.SchemaField("is_active", "BOOLEAN", mode="REQUIRED"),
+            bigquery.SchemaField("created_at", "TIMESTAMP", mode="REQUIRED"),
+            bigquery.SchemaField("updated_at", "TIMESTAMP", mode="REQUIRED"),
+        ]
+        table = bigquery.Table(table_id, schema=schema)
+        client.create_table(table)
+        st.success(f"Successfully created table: `{table_id}`")
+
+def get_all_guidelines() -> pd.DataFrame:
+    """Fetches all guidelines from the BigQuery table."""
+    client = get_bq_client()
+    if not client:
+        return pd.DataFrame()
+
+    table_id = get_guidelines_table_id()
+    query = f"""SELECT guideline_id, guideline_text, is_active, created_at, updated_at
+    FROM (
+        SELECT *, ROW_NUMBER() OVER(PARTITION BY guideline_text ORDER BY updated_at DESC) as rn
+        FROM `{table_id}`
+    ) WHERE rn = 1"""
+    
+    try:
+        return client.query(query).to_dataframe()
+    except Exception:
+        # Return empty dataframe if table doesn't exist
+        return pd.DataFrame()
+
+
+def add_guideline(guideline_text: str):
+    """Adds a new guideline to the BigQuery table."""
+    client = get_bq_client()
+    if not client:
+        return
+
+    table_id = get_guidelines_table_id()
+    now = datetime.now(timezone.utc)
+    guideline_id = f"guideline_{int(now.timestamp() * 1000)}"
+    
+    rows_to_insert = [{
+        "guideline_id": guideline_id,
+        "guideline_text": guideline_text,
+        "is_active": True,
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }]
+
+    errors = client.insert_rows_json(table_id, rows_to_insert)
+    if not errors:
+        st.success("Guideline added successfully!")
+    else:
+        st.error(f"Failed to add guideline: {errors}")
+
+def update_guideline(guideline_id: str, new_text: str, is_active: bool):
+    """Updates an existing guideline in the BigQuery table."""
+    client = get_bq_client()
+    if not client:
+        return
+
+    table_id = get_guidelines_table_id()
+    now = datetime.now(timezone.utc)
+
+    query = f"""
+    UPDATE `{table_id}`
+    SET guideline_text = @new_text, is_active = @is_active, updated_at = @updated_at
+    WHERE guideline_id = @guideline_id
+    """
+    
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("new_text", "STRING", new_text),
+            bigquery.ScalarQueryParameter("is_active", "BOOL", is_active),
+            bigquery.ScalarQueryParameter("updated_at", "TIMESTAMP", now.isoformat()),
+            bigquery.ScalarQueryParameter("guideline_id", "STRING", guideline_id),
+        ]
+    )
+
+    try:
+        client.query(query, job_config=job_config).result()
+        st.success("Guideline updated successfully!")
+    except Exception as e:
+        st.error(f"Failed to update guideline: {e}")
+
+def delete_guideline(guideline_id: str):
+    """Deletes a guideline from the BigQuery table."""
+    client = get_bq_client()
+    if not client:
+        return
+
+    table_id = get_guidelines_table_id()
+    query = f"DELETE FROM `{table_id}` WHERE guideline_id = @guideline_id"
+    
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("guideline_id", "STRING", guideline_id),
+        ]
+    )
+
+    try:
+        client.query(query, job_config=job_config).result()
+        st.success("Guideline deleted successfully!")
+    except Exception as e:
+        st.error(f"Failed to delete guideline: {e}")
