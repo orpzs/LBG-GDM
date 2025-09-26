@@ -10,7 +10,8 @@ from typing import Any, AsyncIterator, Optional
 from types import SimpleNamespace
 import uvicorn
 from contextlib import asynccontextmanager
-from agents.shared_libraries.schema import ChatRequest, ChatResponse
+from agents.shared_libraries.schema import ChatRequest, ChatResponse, SQLAnalysisRequest
+from agents.tools.sql_analysis import extract_sql_details
 from google.adk.artifacts import GcsArtifactService
 from config.settings import Settings
 from fastapi.middleware.cors import CORSMiddleware
@@ -175,6 +176,18 @@ async def dtm_review(
         return ChatResponse(
             response="", error=f"Error in generating DTM review: {str(e)}"
         )
+
+@app.post("/sql_analysis")
+async def sql_analysis(
+    request: SQLAnalysisRequest = Body(...),
+) -> dict:
+    """Process SQL analysis request and get response from the agent"""
+    try:
+        response = extract_sql_details(request.sql_query)
+        return {"response": response}
+    except Exception as e:
+        logging.error("Error processing SQL analysis request: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/hello")
 async def read_root():

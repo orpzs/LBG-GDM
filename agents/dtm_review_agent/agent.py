@@ -117,7 +117,7 @@ StandardizationWrapperAgent = LlmAgent(
     name="standardization_wrapper_agent",
     description="Performs GDM standardization check and passes all data to the final reporting step.",
     instruction=STANDARDIZATION_WRAPPER_PROMPT,
-    input_schema=DtmReviewInput,
+    input_schema=InitialAnalysisOutput,
     output_schema=StandardizationStepOutput,
 )
 
@@ -137,6 +137,7 @@ DtmReviewAgent = SequentialAgent(
     name="dtm_review_agent",
     description="A sequential agent that performs a comprehensive review of a DTM XML model, including a GDM standardization check and a general best-practices review.",
     sub_agents=[
+        InitialAnalysisAgent,
         StandardizationWrapperAgent,
         FinalReportAgent,
     ],

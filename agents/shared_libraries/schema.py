@@ -76,3 +76,12 @@ class ChatResponse(BaseModel):
     thinking_process: str = ""
     attachments: List[inlineData] = []
     error: Optional[str] = None
+
+class SQLAnalysisRequest(BaseModel):
+    """Model for a SQL analysis request.
+
+    Attributes:
+        sql_query: The SQL query to be analyzed.
+    """
+
+    sql_query: str

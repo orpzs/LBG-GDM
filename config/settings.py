@@ -66,13 +66,15 @@ class Settings(BaseSettings):
         return (env_settings, YamlConfigSettingsSource(settings_cls))
 
     # ---------- VARIABLES FROM ENV.SH FILE ----------
-    PROJECT_ID: str = Field(..., env="PROJECT_ID")
+    PROJECT_ID: str = Field("r2d2-00", env="PROJECT_ID")
     PROJECT_NUMBER: int = Field(..., env="PROJECT_NUMBER")
     REGION: str = Field(..., env="REGION")
     RUN_AGENT_WITH_DEBUG: bool = Field(..., env="RUN_AGENT_WITH_DEBUG")
     ARTIFACT_GCS_BUCKET: str = Field(..., env="ARTIFACT_GCS_BUCKET")
     SESSION_DB_URL: str = Field(..., env="SESSION_DB_URL")
     # SERVICE_ACCOUNT: str = Field(..., env="SERVICE_ACCOUNT")
+    RAW_SQL_EXTRACTS_DATASET: str = Field("gdm", env="RAW_SQL_EXTRACTS_DATASET")
+    RAW_SQL_EXTRACTS_TABLE: str = Field("raw_sql_extracts", env="RAW_SQL_EXTRACTS_TABLE")
 
     # RAW_DATA_BUCKET: str = Field(..., env="RAW_DATA_BUCKET")
     # DOCUMENTS_FOLDER: str = Field(..., env="DOCUMENTS_FOLDER")
@@ -95,8 +97,7 @@ class Settings(BaseSettings):
     # OVERWRITE_INDEX: bool = Field(..., env="OVERWRITE_INDEX")
 
     # EMBEDDINGS_LLM: str = Field(..., env="EMBEDDINGS_LLM")
-    # INFERENCE_LLM: str = Field(..., env="INFERENCE_LLM")
-
+    LLM_MODEL: str = Field("gemini-2.5-pro", env="LLM_MODEL")
     # MIRROR_PROJECT_ID: str = Field(..., env="MIRROR_PROJECT_ID")
     # PYTHON_INDEX_URL: str = Field(..., env="PYTHON_INDEX_URL")
     # BASE_IMAGE_URI: str = Field(..., env="BASE_IMAGE_URI")
