@@ -82,6 +82,8 @@ class SQLAnalysisRequest(BaseModel):
 
     Attributes:
         sql_query: The SQL query to be analyzed.
+        file_path: The path of the file containing the SQL query.
     """
 
     sql_query: str
+    file_path: Optional[str] = None

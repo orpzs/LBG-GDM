@@ -1,17 +1,16 @@
-
 from agents.dtm_review_agent.agent import root_agent as dtm_review_agent
 
 from google.adk.sessions import InMemorySessionService, DatabaseSessionService
 from google.adk.runners import Runner
 from google.adk.events import Event
-from fastapi import FastAPI, Body, Depends, HTTPException
+from fastapi import FastAPI, Body, Depends, HTTPException, File, UploadFile
 from dotenv import load_dotenv
 from typing import Any, AsyncIterator, Optional
 from types import SimpleNamespace
 import uvicorn
 from contextlib import asynccontextmanager
 from agents.shared_libraries.schema import ChatRequest, ChatResponse, SQLAnalysisRequest
-from agents.tools.sql_analysis import extract_sql_details
+from agents.shared_libraries.sql_analysis import extract_sql_details
 from google.adk.artifacts import GcsArtifactService
 from config.settings import Settings
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,6 +21,8 @@ from agents.shared_libraries.utils import (
     extract_thinking_process,
 )
 import logging
+from google.genai import types
+import vertexai
 
 load_dotenv()
 logging.basicConfig(level=logging.DEBUG)
@@ -56,6 +57,8 @@ async def lifespan(app: FastAPI):
         session_service=app_contexts.session_service,
         artifact_service=app_contexts.artifact_service,
     )
+
+    vertexai.init(project=config.PROJECT_ID, location=config.REGION)
 
     yield
     #Cleanup operations can go here.
@@ -183,10 +186,55 @@ async def sql_analysis(
 ) -> dict:
     """Process SQL analysis request and get response from the agent"""
     try:
-        response = extract_sql_details(request.sql_query)
+        response = extract_sql_details(request.sql_query, request.file_path)
         return {"response": response}
     except Exception as e:
         logging.error("Error processing SQL analysis request: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+from google.cloud import storage
+
+def upload_bytes_to_gcs(
+    bucket_name: str,
+    blob_name: str,
+    file_bytes: bytes,
+    content_type: Optional[str] = None,
+) -> str:
+    """Uploads a bytes object to Google Cloud Storage and returns the GCS URI."""
+    storage_client = storage.Client()
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    blob.upload_from_string(data=file_bytes, content_type=content_type)
+    gcs_uri = f"gs://{bucket_name}/{blob_name}"
+    return gcs_uri
+
+@app.post("/sql_analysis_from_file")
+async def sql_analysis_from_file(
+    file: UploadFile = File(...),
+    app_context: AppContexts = Depends(get_app_contexts),
+):
+    """
+    Analyzes a SQL file by uploading it to GCS and then running the analysis.
+    """
+    try:
+        content = await file.read()
+        
+        sql_bucket_name = "lbg-gdm-sqls"
+        
+        gcs_path = upload_bytes_to_gcs(
+            bucket_name=sql_bucket_name,
+            blob_name=file.filename,
+            file_bytes=content,
+            content_type=file.content_type,
+        )
+
+        sql_query = content.decode("utf-8")
+
+        response = extract_sql_details(sql_query, gcs_path)
+
+        return {"response": response}
+    except Exception as e:
+        logging.error("Error processing SQL analysis from file: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/hello")
@@ -199,56 +247,3 @@ async def read_root():
 if __name__ == "__main__":
     import os
     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))
-
-
-
-
-
-# import os
-# import uvicorn
-# from fastapi import FastAPI
-# from google.adk.cli.fast_api import get_fast_api_app
-# from agents.config_load import GetConf
-# from fastapi.middleware.cors import CORSMiddleware
-
-
-
-# config = GetConf.load_configs()
-
-# AGENT_DIR = os.path.dirname(os.path.abspath(__file__))
-
-
-
-
-# # app = get_fast_api_app(
-# #     agent_dir=AGENT_DIR,
-# #     session_db_url=config.SESSION_DB_URL,
-# #     artifact_storage_uri = f"gs://{config.ARTIFACT_GCS_BUCKET}",
-# #     allow_origins= ["*"],
-# #     web=config.SERVE_WEB_INTERFACE,
-    
-# # )
-
-# app = get_fast_api_app(
-#     agent_dir=AGENT_DIR,
-#     session_db_url=config.SESSION_DB_URL,
-#     allow_origins= ["*"],
-#     web=config.SERVE_WEB_INTERFACE,
-    
-# )
-# # # Add CORS middleware
-# # app.add_middleware(
-# #     CORSMiddleware,
-# #     allow_origins=["*"],  # In production, replace with frontend URL
-# #     allow_credentials=True,
-# #     allow_methods=["*"],
-# #     allow_headers=["*"],
-# # )
-
-# @app.get("/hello")
-# async def read_root():
-#     return {"Hello": "World"}
-
-
-# if __name__ == "__main__":
-#     uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", 8080)))

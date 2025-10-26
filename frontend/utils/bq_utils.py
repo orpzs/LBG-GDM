@@ -282,20 +282,27 @@ def add_guideline(guideline_text: str):
     table_id = get_guidelines_table_id()
     now = datetime.now(timezone.utc)
     guideline_id = f"guideline_{int(now.timestamp() * 1000)}"
-    
-    rows_to_insert = [{
-        "guideline_id": guideline_id,
-        "guideline_text": guideline_text,
-        "is_active": True,
-        "created_at": now.isoformat(),
-        "updated_at": now.isoformat(),
-    }]
 
-    errors = client.insert_rows_json(table_id, rows_to_insert)
-    if not errors:
+    query = f"""
+    INSERT INTO `{table_id}` (guideline_id, guideline_text, is_active, created_at, updated_at)
+    VALUES (@guideline_id, @guideline_text, @is_active, @created_at, @updated_at)
+    """
+    
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("guideline_id", "STRING", guideline_id),
+            bigquery.ScalarQueryParameter("guideline_text", "STRING", guideline_text),
+            bigquery.ScalarQueryParameter("is_active", "BOOLEAN", True),
+            bigquery.ScalarQueryParameter("created_at", "TIMESTAMP", now.isoformat()),
+            bigquery.ScalarQueryParameter("updated_at", "TIMESTAMP", now.isoformat()),
+        ]
+    )
+
+    try:
+        client.query(query, job_config=job_config).result()
         st.success("Guideline added successfully!")
-    else:
-        st.error(f"Failed to add guideline: {errors}")
+    except Exception as e:
+        st.error(f"Failed to add guideline: {e}")
 
 def update_guideline(guideline_id: str, new_text: str, is_active: bool):
     """Updates an existing guideline in the BigQuery table."""
@@ -347,3 +354,309 @@ def delete_guideline(guideline_id: str):
         st.success("Guideline deleted successfully!")
     except Exception as e:
         st.error(f"Failed to delete guideline: {e}")
+
+def delete_analysis_data(q_id: str):
+    """Deletes all analysis data for a given q_id from the related tables."""
+    client = get_bq_client()
+    if not client:
+        st.error("BigQuery client not available.")
+        return
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    
+    tables_to_delete_from = [
+        "query_statements",
+        "statement_sources",
+        "column_lineage",
+        "statement_joins",
+        "statement_filters",
+         "raw_sql_extracts"
+    ]
+
+    for table_name in tables_to_delete_from:
+        table_id = f"{project_id}.{dataset_id}.{table_name}"
+        query = f"DELETE FROM `{table_id}` WHERE q_id = @q_id"
+        
+        job_config = bigquery.QueryJobConfig(
+            query_parameters=[
+                bigquery.ScalarQueryParameter("q_id", "STRING", q_id),
+            ]
+        )
+
+        try:
+            client.query(query, job_config=job_config).result()
+            st.toast(f"Deleted data from {table_name} for q_id: {q_id}")
+        except Exception as e:
+            # Don't fail if a table doesn't exist
+            if "Not found: Table" in str(e):
+                st.warning(f"Table {table_id} not found, skipping delete.")
+                continue
+            st.error(f"Failed to delete data from {table_name}: {e}")
+
+
+def delete_raw_sql_extract(q_id: str):
+    """Deletes a raw_sql_extract for a given q_id."""
+    client = get_bq_client()
+    if not client:
+        st.error("BigQuery client not available.")
+        return
+
+    table_id = get_raw_sql_extracts_table_id()
+    query = f"DELETE FROM `{table_id}` WHERE q_id = @q_id"
+    
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("q_id", "STRING", q_id),
+        ]
+    )
+
+    try:
+        client.query(query, job_config=job_config).result()
+        st.toast(f"Deleted data from raw_sql_extracts for q_id: {q_id}")
+    except Exception as e:
+        st.error(f"Failed to delete data from raw_sql_extracts: {e}")
+
+
+def get_raw_sql_extracts_table_id():
+    """Constructs the full BigQuery table ID for raw_sql_extracts."""
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    table_name = st.session_state.get("raw_sql_extracts_bq_table", "raw_sql_extracts")
+    return f"{project_id}.{dataset_id}.{table_name}"
+
+def get_sql_extract(file_name: str):
+    """Fetches the processing status and parser output for a given file name from the raw_sql_extracts table."""
+    client = get_bq_client()
+    if not client:
+        return None
+
+    table_id = get_raw_sql_extracts_table_id()
+    query = f"""
+        SELECT
+            processing_status,
+            parser_output
+        FROM `{table_id}`
+        WHERE file_name = @file_name
+    """
+    
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("file_name", "STRING", file_name),
+        ]
+    )
+
+    try:
+        query_job = client.query(query, job_config=job_config)
+        results = query_job.to_dataframe()
+        if not results.empty:
+            return results.to_dict('records')[0]
+        return None
+    except Exception as e:
+        st.error(f"Could not fetch SQL extract details: {e}")
+        return None
+
+def insert_df_to_bq(df: pd.DataFrame, table_id: str) -> bool:
+    """Inserts a DataFrame into a BigQuery table."""
+    client = get_bq_client()
+    if not client:
+        st.warning("BigQuery client not available. Skipping insert.")
+        return False
+
+    job_config = bigquery.LoadJobConfig(
+        write_disposition="WRITE_APPEND",
+        create_disposition="CREATE_IF_NEEDED",
+    )
+
+    try:
+        job = client.load_table_from_dataframe(
+            df, table_id, job_config=job_config
+        )
+        job.result()
+        return True
+    except Exception as e:
+        st.error(f"Failed to insert data into BigQuery: {e}")
+        return False
+
+def update_processing_status(q_id: str, status: str):
+    """Updates the processing status of a record in the raw_sql_extracts table."""
+    client = get_bq_client()
+    if not client:
+        return
+
+    table_id = get_raw_sql_extracts_table_id()
+    query = f"""
+        UPDATE `{table_id}`
+        SET processing_status = @status, processed_at = @processed_at
+        WHERE q_id = @q_id
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("status", "STRING", status),
+            bigquery.ScalarQueryParameter("processed_at", "TIMESTAMP", datetime.now(timezone.utc)),
+            bigquery.ScalarQueryParameter("q_id", "STRING", q_id),
+        ]
+    )
+
+    try:
+        client.query(query, job_config=job_config).result()
+    except Exception as e:
+        st.error(f"Failed to update processing status: {e}")
+
+@st.cache_data(ttl=3600)
+def get_all_sql_extracts():
+    """Fetches all records from the raw_sql_extracts table."""
+    client = get_bq_client()
+    if not client:
+        return pd.DataFrame()
+
+    table_id = get_raw_sql_extracts_table_id()
+    # Assuming 'inserted_at' is a column in your table for ordering
+    query = f"""
+        SELECT
+          file_name,
+          q_id,
+          query_inferred_detail,
+          processing_status,
+          processed_at,
+          dependencies
+        FROM `{table_id}`
+        ORDER BY file_name
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch SQL extracts: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_tables_for_qid(q_id: str) -> pd.DataFrame:
+    """Fetches all tables for a given q_id."""
+    client = get_bq_client()
+    if not client or not q_id:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    table_id = f"{project_id}.{dataset_id}.query_statements"
+
+    query = f"""
+        SELECT DISTINCT
+            target_database_name,
+            target_schema_name,
+            target_table_name,
+            inferred_target_type
+        FROM `{table_id}`
+        WHERE q_id = @q_id
+        ORDER BY
+            inferred_target_type,
+            target_table_name
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("q_id", "STRING", q_id),
+        ]
+    )
+    try:
+        return client.query(query, job_config=job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch tables for q_id {q_id}: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_statements_for_qids(q_ids: list[str]) -> pd.DataFrame:
+    """Fetches all statements for a given list of q_ids."""
+    client = get_bq_client()
+    if not client or not q_ids:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    table_id = f"{project_id}.{dataset_id}.query_statements"
+
+    query = f"""
+        SELECT
+            q_id,
+            s_id,
+            statement_type,
+            target_table_name
+        FROM `{table_id}`
+        WHERE q_id IN UNNEST(@q_ids)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("q_ids", "STRING", q_ids),
+        ]
+    )
+    try:
+        return client.query(query, job_config=job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch statements: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_sources_for_sids(q_ids: list[str], s_ids: list[str]) -> pd.DataFrame:
+    """Fetches all sources for a given list of s_ids."""
+    client = get_bq_client()
+    if not client or not s_ids or not q_ids:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    table_id = f"{project_id}.{dataset_id}.statement_sources"
+
+    query = f"""
+        SELECT
+            q_id,
+            s_id,
+            source_table_name,
+            source_alias,
+            source_type
+        FROM `{table_id}`
+        WHERE q_id IN UNNEST(@q_ids) AND s_id IN UNNEST(@s_ids)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("q_ids", "STRING", q_ids),
+            bigquery.ArrayQueryParameter("s_ids", "STRING", s_ids),
+        ]
+    )
+    try:
+        return client.query(query, job_config=job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch sources: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_column_lineage_for_sids(q_ids: list[str], s_ids: list[str]) -> pd.DataFrame:
+    """Fetches all column lineage for a given list of s_ids."""
+    client = get_bq_client()
+    if not client or not s_ids or not q_ids:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    table_id = f"{project_id}.{dataset_id}.column_lineage"
+
+    query = f"""
+        SELECT
+            q_id,
+            s_id,
+            output_column_name,
+            transformation_logic,
+            source_references
+        FROM `{table_id}`
+        WHERE q_id IN UNNEST(@q_ids) AND s_id IN UNNEST(@s_ids)
+    """
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ArrayQueryParameter("q_ids", "STRING", q_ids),
+            bigquery.ArrayQueryParameter("s_ids", "STRING", s_ids),
+        ]
+    )
+    try:
+        return client.query(query, job_config=job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch column lineage: {e}")
+        return pd.DataFrame()

@@ -98,6 +98,7 @@ def setup_pages() -> None:
                         st.Page("pages/load_entities.py", title="Load Data Model Entities", icon=":material/upload_file:"),
                         st.Page("pages/define_guidelines.py", title="Define Guidelines", icon=":material/rule:"), 
                         st.Page("pages/sql_analysis_page.py", title="SQL Analysis", icon=":material/analytics:"),
+                        st.Page("pages/lineage_explorer.py", title="Lineage Explorer", icon=":material/account_tree:"),
                         # st.Page("pages/tdd_generate.py", title="Generation Assistant", icon=":material/description:"),
                         # st.Page("pages/generate_config_files.py", title="Config Generator", icon=":material/settings_applications:"),
 

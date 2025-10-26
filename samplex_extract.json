@@ -1,0 +1,1155 @@
+{
+    "file_summary": {
+        "inferred_detail": "This script populates the `CC_AGREEMENT_ADDED_DATE` table, which tracks the initial creation date ('added date') and origination channel details for credit card agreements. The process begins by updating a log table (`CC_COBRA_LOAD_LOG`) to mark the job as running. It first gathers initial agreement data into a work table (`WK_CC_AGREEMENT_ADDED_DT_T1`), including details from `CREDIT_CARD_AGREEMENT` and `AGREEMENT`. The script then clears and populates the final `CC_AGREEMENT_ADDED_DATE` table, handling product transfers (trades) by using the `AGREEMENT_RELATIONSHIP` table to link new agreements to original ones. It enriches the data with sales channel information and data for migrated accounts (`VW_CC_MIGRATION_ACCOUNTS`). Finally, it cleans up the work table and updates the log table to 'Completed' upon success or 'Failed' on error.",
+        "dependencies": [
+            "C01J01",
+            "C01J02"
+        ]
+    },
+    "statements": [
+        {
+            "s_id": "s1",
+            "statement_type": "UPDATE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_COBRA_LOAD_LOG",
+                "alias": null,
+                "inferred_target_type": "LOG_TABLE"
+            },
+            "sources": [
+                {
+                    "source_id": "src1",
+                    "database_name": "CC_COBRA",
+                    "schema_name": null,
+                    "table_name": "CC_COBRA_LOAD_STATUS",
+                    "alias": "A",
+                    "source_type": "BASE_TABLE"
+                }
+            ],
+            "column_lineage": [
+                {
+                    "output_column_name": "RUN_ID",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "A.RUN_ID",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "RUN_ID"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "LOAD_STATUS",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "'I'",
+                    "source_references": []
+                },
+                {
+                    "output_column_name": "LOAD_START_DT",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "DATE",
+                    "source_references": []
+                },
+                {
+                    "output_column_name": "LOAD_START_TM",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "TIME",
+                    "source_references": []
+                }
+            ],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "CC_COBRA.CC_COBRA_LOAD_LOG.GRID_LOAD_ID = 'C01J02'",
+                    "involved_columns": [
+                        {
+                            "source_id": "target",
+                            "column_name": "GRID_LOAD_ID"
+                        }
+                    ]
+                },
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "A.RUN_STATUS = 'I'",
+                    "involved_columns": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "RUN_STATUS"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "s_id": "s2",
+            "statement_type": "DELETE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "WK_CC_AGREEMENT_ADDED_DT_T1",
+                "alias": null,
+                "inferred_target_type": "WORK_TABLE"
+            },
+            "sources": [],
+            "column_lineage": [],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "ALL",
+                    "involved_columns": []
+                }
+            ]
+        },
+        {
+            "s_id": "s3",
+            "statement_type": "INSERT",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "WK_CC_AGREEMENT_ADDED_DT_T1",
+                "alias": null,
+                "inferred_target_type": "WORK_TABLE"
+            },
+            "sources": [
+                {
+                    "source_id": "src1",
+                    "database_name": null,
+                    "schema_name": null,
+                    "table_name": "(SELECT ORG_TX, AGRMNT_ID, MIN(SOURCE_START_DT) AS ADDED_DTnFROM GDW_VIEWSX.CREDIT_CARD_AGREEMENT AnWHERE ORG_TX <> '170'nGROUP BY 1,2)",
+                    "alias": "A",
+                    "source_type": "SUBQUERY"
+                },
+                {
+                    "source_id": "src2",
+                    "database_name": "CC_COBRA",
+                    "schema_name": null,
+                    "table_name": "CC_COBRA_LOAD_START_DT",
+                    "alias": "D",
+                    "source_type": "BASE_TABLE"
+                },
+                {
+                    "source_id": "src3",
+                    "database_name": "GDW_VIEWSX",
+                    "schema_name": null,
+                    "table_name": "CREDIT_CARD_AGREEMENT",
+                    "alias": "CCA",
+                    "source_type": "BASE_TABLE"
+                },
+                {
+                    "source_id": "src4",
+                    "database_name": "GDW_VIEWSX",
+                    "schema_name": null,
+                    "table_name": "AGREEMENT",
+                    "alias": "B",
+                    "source_type": "BASE_TABLE"
+                },
+                {
+                    "source_id": "src5",
+                    "database_name": "CC_COBRA",
+                    "schema_name": null,
+                    "table_name": "CC_VERDE_FLAG_DAILY",
+                    "alias": "V",
+                    "source_type": "BASE_TABLE"
+                }
+            ],
+            "column_lineage": [
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 1,
+                    "transformation_logic": "A.ORG_TX",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORG_TX"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 2,
+                    "transformation_logic": "CASE WHEN V.VERDE_IN IN (1,2) THEN '170' ELSE A.ORG_TX END",
+                    "source_references": [
+                        {
+                            "source_id": "src5",
+                            "column_name": "VERDE_IN"
+                        },
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORG_TX"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 3,
+                    "transformation_logic": "A.AGRMNT_ID",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 4,
+                    "transformation_logic": "CCA.CREDIT_CARD_LOGO_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "CREDIT_CARD_LOGO_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 5,
+                    "transformation_logic": "A.ADDED_DT",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ADDED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 6,
+                    "transformation_logic": "B.OPENED_DT",
+                    "source_references": [
+                        {
+                            "source_id": "src4",
+                            "column_name": "OPENED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 7,
+                    "transformation_logic": "B.AGRMNT_EXPIRY_DT",
+                    "source_references": [
+                        {
+                            "source_id": "src4",
+                            "column_name": "AGRMNT_EXPIRY_DT"
+                        }
+                    ]
+                }
+            ],
+            "joins": [
+                {
+                    "join_type": "JOIN",
+                    "left_source_id": "src1",
+                    "right_source_id": "src2",
+                    "join_conditions": [
+                        {
+                            "left_source_id": "src1",
+                            "left_column": "ADDED_DT",
+                            "operator": "<=",
+                            "right_source_id": "src2",
+                            "right_column": "SOURCE_START_DT"
+                        }
+                    ]
+                },
+                {
+                    "join_type": "JOIN",
+                    "left_source_id": "src1",
+                    "right_source_id": "src3",
+                    "join_conditions": [
+                        {
+                            "left_source_id": "src1",
+                            "left_column": "AGRMNT_ID",
+                            "operator": "=",
+                            "right_source_id": "src3",
+                            "right_column": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "join_type": "JOIN",
+                    "left_source_id": "src1",
+                    "right_source_id": "src4",
+                    "join_conditions": [
+                        {
+                            "left_source_id": "src1",
+                            "left_column": "AGRMNT_ID",
+                            "operator": "=",
+                            "right_source_id": "src4",
+                            "right_column": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "join_type": "LEFT JOIN",
+                    "left_source_id": "src1",
+                    "right_source_id": "src5",
+                    "join_conditions": [
+                        {
+                            "left_source_id": "src1",
+                            "left_column": "AGRMNT_ID",
+                            "operator": "=",
+                            "right_source_id": "src5",
+                            "right_column": "AGRMNT_ID"
+                        }
+                    ]
+                }
+            ],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "ORG_TX <> '170'",
+                    "involved_columns": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORG_TX"
+                        }
+                    ]
+                },
+                {
+                    "clause": "ON",
+                    "filter_expression": "CCA.SOURCE_END_DT = '3500/12/31'",
+                    "involved_columns": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "SOURCE_END_DT"
+                        }
+                    ]
+                },
+                {
+                    "clause": "ON",
+                    "filter_expression": "B.SOURCE_END_DT = '3500/12/31'",
+                    "involved_columns": [
+                        {
+                            "source_id": "src4",
+                            "column_name": "SOURCE_END_DT"
+                        }
+                    ]
+                },
+                {
+                    "clause": "ON",
+                    "filter_expression": "V.SOURCE_END_DT = '3500/12/31'",
+                    "involved_columns": [
+                        {
+                            "source_id": "src5",
+                            "column_name": "SOURCE_END_DT"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "s_id": "s4",
+            "statement_type": "DELETE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_AGREEMENT_ADDED_DATE",
+                "alias": null,
+                "inferred_target_type": "BASE_TABLE"
+            },
+            "sources": [],
+            "column_lineage": [],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "ALL",
+                    "involved_columns": []
+                }
+            ]
+        },
+        {
+            "s_id": "s5",
+            "statement_type": "INSERT",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_AGREEMENT_ADDED_DATE",
+                "alias": null,
+                "inferred_target_type": "BASE_TABLE"
+            },
+            "sources": [
+                {
+                    "source_id": "src1",
+                    "database_name": null,
+                    "schema_name": null,
+                    "table_name": "(SELECT B2.ORG_TX , B2.V_ORG , T1.AGRMNT_ID , T1.ORIGNL_AGRMNT_ID , T1.AGRMNT_RLTNSP_SEQUNC_NO , B2.CREDIT_CARD_LOGO_CD , COALESCE(M.ACC_BUILD_DT,B2.ADDED_DT) , COALESCE(M.ACC_OPEN_DT,B.ADDED_DT) , B2.OPENED_DT , B2.PURGED_DT , AST.AGRMNT_SELLNG_SORT_CD , AST.MAC_CD , AST.AGRMNT_SELLNG_CHANNL_CD , AST.AGRMNT_SELLNG_SORT_CD , AST.MAC_CD , AST.AGRMNT_SELLNG_CHANNL_CD FROM GDW_VIEWSX.AGREEMENT_RELATIONSHIP T1 JOIN CC_COBRA.WK_CC_AGREEMENT_ADDED_DT_T1 B ON T1.ORIGNL_AGRMNT_ID = B.AGRMNT_ID JOIN CC_COBRA.WK_CC_AGREEMENT_ADDED_DT_T1 B2 ON T1.AGRMNT_ID = B2.AGRMNT_ID LEFT JOIN GRIDX_DV_RETAIL.AGREEMENT_STATIC AST ON T1.AGRMNT_ID = AST.AGRMNT_ID LEFT JOIN CC_COBRA_VIEWS.VW_CC_MIGRATION_ACCOUNTS M ON T1.AGRMNT_ID = M.AGRMNT_ID WHERE AGRMNT_RLTNSP_SEQUNC_NO IS NOT NULL UNION SELECT B.ORG_TX , B.V_ORG , T1.ORIGNL_AGRMNT_ID AS AGRMNT_ID , T1.ORIGNL_AGRMNT_ID , 0 AS AGRMNT_RLTNSP_SEQUNC_NO , B.CREDIT_CARD_LOGO_CD , COALESCE(M.ACC_BUILD_DT,B.ADDED_DT) , COALESCE(M.ACC_OPEN_DT,B.ADDED_DT) , B.OPENED_DT , B.PURGED_DT , AST.AGRMNT_SELLNG_SORT_CD , AST.MAC_CD , AST.AGRMNT_SELLNG_CHANNL_CD , AST.AGRMNT_SELLNG_SORT_CD , AST.MAC_CD , AST.AGRMNT_SELLNG_CHANNL_CD FROM GDW_VIEWSX.AGREEMENT_RELATIONSHIP T1 JOIN CC_COBRA.WK_CC_AGREEMENT_ADDED_DT_T1 B ON T1.ORIGNL_AGRMNT_ID = B.AGRMNT_ID LEFT JOIN GRIDX_DV_RETAIL.AGREEMENT_STATIC AST ON T1.ORIGNL_AGRMNT_ID = AST.AGRMNT_ID LEFT JOIN CC_COBRA_VIEWS.VW_CC_MIGRATION_ACCOUNTS M ON T1.ORIGNL_AGRMNT_ID = M.AGRMNT_ID WHERE AGRMNT_RLTNSP_SEQUNC_NO = 1)",
+                    "alias": null,
+                    "source_type": "SUBQUERY"
+                }
+            ],
+            "column_lineage": [
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 1,
+                    "transformation_logic": "B2.ORG_TX",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORG_TX"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 2,
+                    "transformation_logic": "B2.V_ORG",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "V_ORG"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 3,
+                    "transformation_logic": "T1.AGRMNT_ID",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 4,
+                    "transformation_logic": "T1.ORIGNL_AGRMNT_ID",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORIGNL_AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 5,
+                    "transformation_logic": "T1.AGRMNT_RLTNSP_SEQUNC_NO",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_RLTNSP_SEQUNC_NO"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 6,
+                    "transformation_logic": "B2.CREDIT_CARD_LOGO_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "CREDIT_CARD_LOGO_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 7,
+                    "transformation_logic": "COALESCE(M.ACC_BUILD_DT,B2.ADDED_DT)",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ACC_BUILD_DT"
+                        },
+                        {
+                            "source_id": "src1",
+                            "column_name": "ADDED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 8,
+                    "transformation_logic": "COALESCE(M.ACC_OPEN_DT,B.ADDED_DT)",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ACC_OPEN_DT"
+                        },
+                        {
+                            "source_id": "src1",
+                            "column_name": "ADDED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 9,
+                    "transformation_logic": "B2.OPENED_DT",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "OPENED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 10,
+                    "transformation_logic": "B2.PURGED_DT",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "PURGED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 11,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_SORT_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_SORT_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 12,
+                    "transformation_logic": "AST.MAC_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "MAC_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 13,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_CHANNL_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_CHANNL_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 14,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_SORT_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_SORT_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 15,
+                    "transformation_logic": "AST.MAC_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "MAC_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 16,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_CHANNL_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_CHANNL_CD"
+                        }
+                    ]
+                }
+            ],
+            "joins": [],
+            "filters": []
+        },
+        {
+            "s_id": "s6",
+            "statement_type": "INSERT",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_AGREEMENT_ADDED_DATE",
+                "alias": null,
+                "inferred_target_type": "BASE_TABLE"
+            },
+            "sources": [
+                {
+                    "source_id": "src1",
+                    "database_name": "GDW_VIEWSX",
+                    "schema_name": null,
+                    "table_name": "CREDIT_CARD_AGREEMENT",
+                    "alias": "A",
+                    "source_type": "BASE_TABLE"
+                },
+                {
+                    "source_id": "src2",
+                    "database_name": "CC_COBRA",
+                    "schema_name": null,
+                    "table_name": "WK_CC_AGREEMENT_ADDED_DT_T1",
+                    "alias": "B",
+                    "source_type": "WORK_TABLE"
+                },
+                {
+                    "source_id": "src3",
+                    "database_name": "GRIDX_DV_RETAIL",
+                    "schema_name": null,
+                    "table_name": "AGREEMENT_STATIC",
+                    "alias": "AST",
+                    "source_type": "BASE_TABLE"
+                },
+                {
+                    "source_id": "src4",
+                    "database_name": "CC_COBRA_VIEWS",
+                    "schema_name": null,
+                    "table_name": "VW_CC_MIGRATION_ACCOUNTS",
+                    "alias": "M",
+                    "source_type": "BASE_TABLE"
+                }
+            ],
+            "column_lineage": [
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 1,
+                    "transformation_logic": "B.ORG_TX",
+                    "source_references": [
+                        {
+                            "source_id": "src2",
+                            "column_name": "ORG_TX"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 2,
+                    "transformation_logic": "B.V_ORG",
+                    "source_references": [
+                        {
+                            "source_id": "src2",
+                            "column_name": "V_ORG"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 3,
+                    "transformation_logic": "A.AGRMNT_ID",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 4,
+                    "transformation_logic": "A.AGRMNT_ID",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 5,
+                    "transformation_logic": "0",
+                    "source_references": []
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 6,
+                    "transformation_logic": "B.CREDIT_CARD_LOGO_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src2",
+                            "column_name": "CREDIT_CARD_LOGO_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 7,
+                    "transformation_logic": "COALESCE(M.ACC_BUILD_DT,B.ADDED_DT)",
+                    "source_references": [
+                        {
+                            "source_id": "src4",
+                            "column_name": "ACC_BUILD_DT"
+                        },
+                        {
+                            "source_id": "src2",
+                            "column_name": "ADDED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 8,
+                    "transformation_logic": "COALESCE(M.ACC_OPEN_DT,B.ADDED_DT)",
+                    "source_references": [
+                        {
+                            "source_id": "src4",
+                            "column_name": "ACC_OPEN_DT"
+                        },
+                        {
+                            "source_id": "src2",
+                            "column_name": "ADDED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 9,
+                    "transformation_logic": "B.OPENED_DT",
+                    "source_references": [
+                        {
+                            "source_id": "src2",
+                            "column_name": "OPENED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 10,
+                    "transformation_logic": "B.PURGED_DT",
+                    "source_references": [
+                        {
+                            "source_id": "src2",
+                            "column_name": "PURGED_DT"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 11,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_SORT_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "AGRMNT_SELLNG_SORT_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 12,
+                    "transformation_logic": "AST.MAC_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "MAC_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 13,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_CHANNL_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "AGRMNT_SELLNG_CHANNL_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 14,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_SORT_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "AGRMNT_SELLNG_SORT_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 15,
+                    "transformation_logic": "AST.MAC_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "MAC_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": null,
+                    "output_column_ordinal": 16,
+                    "transformation_logic": "AST.AGRMNT_SELLNG_CHANNL_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src3",
+                            "column_name": "AGRMNT_SELLNG_CHANNL_CD"
+                        }
+                    ]
+                }
+            ],
+            "joins": [
+                {
+                    "join_type": "JOIN",
+                    "left_source_id": "src1",
+                    "right_source_id": "src2",
+                    "join_conditions": [
+                        {
+                            "left_source_id": "src1",
+                            "left_column": "AGRMNT_ID",
+                            "operator": "=",
+                            "right_source_id": "src2",
+                            "right_column": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "join_type": "LEFT JOIN",
+                    "left_source_id": "src1",
+                    "right_source_id": "src3",
+                    "join_conditions": [
+                        {
+                            "left_source_id": "src1",
+                            "left_column": "AGRMNT_ID",
+                            "operator": "=",
+                            "right_source_id": "src3",
+                            "right_column": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "join_type": "LEFT JOIN",
+                    "left_source_id": "src1",
+                    "right_source_id": "src4",
+                    "join_conditions": [
+                        {
+                            "left_source_id": "src1",
+                            "left_column": "AGRMNT_ID",
+                            "operator": "=",
+                            "right_source_id": "src4",
+                            "right_column": "AGRMNT_ID"
+                        }
+                    ]
+                }
+            ],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "NOT EXISTS (SELECT NULLn                  FROM CC_COBRA.CC_AGREEMENT_ADDED_DATE Bn                  WHERE A.AGRMNT_ID = B.AGRMNT_ID)",
+                    "involved_columns": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_ID"
+                        }
+                    ]
+                },
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "A.SOURCE_END_DT = '3500/12/31'",
+                    "involved_columns": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "SOURCE_END_DT"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "s_id": "s7",
+            "statement_type": "UPDATE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_AGREEMENT_ADDED_DATE",
+                "alias": null,
+                "inferred_target_type": "BASE_TABLE"
+            },
+            "sources": [
+                {
+                    "source_id": "src1",
+                    "database_name": null,
+                    "schema_name": null,
+                    "table_name": "(SELECT CAK.AGRMNT_ID ,AOM.SELLNG_BRANCH_SORT_CD AS AGRMNT_SELLNG_SORT_CD ,COALESCE(WK_MAC.MAC_CD,'9999999999999999') AS MAC_CD ,CHC.CHANNL_CD AS AGRMNT_SELLNG_CHANNL_CD FROM (SELECT * FROM GDW_VIEWSX.CREDIT_CARD_AGREEMENT A WHERE NOT EXISTS (SELECT 'Y' FROM GRIDX_DV_RETAIL.AGREEMENT_STATIC B WHERE A.AGRMNT_ID = B.AGRMNT_ID) AND A.SOURCE_END_DT = '3500/12/31' ) CAK LEFT OUTER JOIN GDW_VIEWSX.AGREEMENT_OFFER_MANAGER AOM ON CAK.AGRMNT_ID = AOM.AGRMNT_ID AND AOM.OFFER_ID_TX IN ('NEWACC','005Z0NEW ') AND AOM.SOURCE_END_DT = '3500/12/31' LEFT OUTER JOIN (SELECT ACM.AGRMNT_ID ,ACM.MAC_CD ,ACM.NEW_MAC_TYPE_IN ,ROW_NUMBER() OVER (PARTITION BY ACM.AGRMNT_ID ORDER BY ACM.SOURCE_START_DT) AS MAC_SEQ FROM GDW_VIEWSX.AGREEMENT_CC_MAC ACM INNER JOIN GDW_VIEWSX.CREDIT_CARD_AGREEMENT CAK ON CAK.AGRMNT_ID = ACM.AGRMNT_ID AND CAK.SOURCE_END_DT = '3500/12/31' WHERE NEW_MAC_TYPE_IN = 'Y') AS WK_MAC ON CAK.AGRMNT_ID = WK_MAC.AGRMNT_ID AND WK_MAC.MAC_SEQ = 1 LEFT OUTER JOIN ( SEL CHANNL_CD, SORT_CD FROM GDW_VIEWS.OU_STRUCTURE_SORTCODE_GL GROUP BY 1,2 ) CHC ON AOM.SELLNG_BRANCH_SORT_CD = CAST(CHC.SORT_CD AS CHAR(6)))",
+                    "alias": "T1",
+                    "source_type": "SUBQUERY"
+                }
+            ],
+            "column_lineage": [
+                {
+                    "output_column_name": "AGRMNT_SELLNG_SORT_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.AGRMNT_SELLNG_SORT_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_SORT_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "MAC_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.MAC_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "MAC_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "AGRMNT_SELLNG_CHANNL_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.AGRMNT_SELLNG_CHANNL_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_CHANNL_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "ORIGNL_AGRMNT_SELLNG_SORT_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.AGRMNT_SELLNG_SORT_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_SORT_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "ORIGNL_MAC_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.MAC_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "MAC_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "ORIGNL_AGRMNT_SELLNG_CHANNL_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.AGRMNT_SELLNG_CHANNL_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_SELLNG_CHANNL_CD"
+                        }
+                    ]
+                }
+            ],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "CC_COBRA.CC_AGREEMENT_ADDED_DATE.AGRMNT_ID = T1.AGRMNT_ID",
+                    "involved_columns": [
+                        {
+                            "source_id": "target",
+                            "column_name": "AGRMNT_ID"
+                        },
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_ID"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "s_id": "s8",
+            "statement_type": "UPDATE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_AGREEMENT_ADDED_DATE",
+                "alias": null,
+                "inferred_target_type": "BASE_TABLE"
+            },
+            "sources": [
+                {
+                    "source_id": "src1",
+                    "database_name": null,
+                    "schema_name": null,
+                    "table_name": "(SELECT A.AGRMNT_ID ,B.ORIGNL_AGRMNT_SELLNG_SORT_CD ,B.ORIGNL_MAC_CD ,B.ORIGNL_AGRMNT_SELLNG_CHANNL_CD FROM CC_COBRA.CC_AGREEMENT_ADDED_DATE A JOIN CC_COBRA.CC_AGREEMENT_ADDED_DATE B ON A.ORIGNL_AGRMNT_ID = B.ORIGNL_AGRMNT_ID AND B.ORIGNL_AGRMNT_ID = B.AGRMNT_ID AND A.ORIGNL_AGRMNT_ID <> A.AGRMNT_ID )",
+                    "alias": "T1",
+                    "source_type": "SUBQUERY"
+                }
+            ],
+            "column_lineage": [
+                {
+                    "output_column_name": "ORIGNL_AGRMNT_SELLNG_SORT_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.ORIGNL_AGRMNT_SELLNG_SORT_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORIGNL_AGRMNT_SELLNG_SORT_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "ORIGNL_MAC_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.ORIGNL_MAC_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORIGNL_MAC_CD"
+                        }
+                    ]
+                },
+                {
+                    "output_column_name": "ORIGNL_AGRMNT_SELLNG_CHANNL_CD",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "T1.ORIGNL_AGRMNT_SELLNG_CHANNL_CD",
+                    "source_references": [
+                        {
+                            "source_id": "src1",
+                            "column_name": "ORIGNL_AGRMNT_SELLNG_CHANNL_CD"
+                        }
+                    ]
+                }
+            ],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "CC_COBRA.CC_AGREEMENT_ADDED_DATE.AGRMNT_ID = T1.AGRMNT_ID",
+                    "involved_columns": [
+                        {
+                            "source_id": "target",
+                            "column_name": "AGRMNT_ID"
+                        },
+                        {
+                            "source_id": "src1",
+                            "column_name": "AGRMNT_ID"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "s_id": "s9",
+            "statement_type": "DELETE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "WK_CC_AGREEMENT_ADDED_DT_T1",
+                "alias": null,
+                "inferred_target_type": "WORK_TABLE"
+            },
+            "sources": [],
+            "column_lineage": [],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "ALL",
+                    "involved_columns": []
+                }
+            ]
+        },
+        {
+            "s_id": "s10",
+            "statement_type": "UPDATE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_COBRA_LOAD_LOG",
+                "alias": null,
+                "inferred_target_type": "LOG_TABLE"
+            },
+            "sources": [],
+            "column_lineage": [
+                {
+                    "output_column_name": "CURRENT_LOAD_DT",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "(SELECT START_DT FROM CC_COBRA.CC_COBRA_LOAD_START_DT)",
+                    "source_references": []
+                },
+                {
+                    "output_column_name": "CURRENT_BUS_DT",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "(SELECT SOURCE_START_DT FROM CC_COBRA.CC_COBRA_LOAD_START_DT)",
+                    "source_references": []
+                },
+                {
+                    "output_column_name": "UPDATE_DT",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "DATE",
+                    "source_references": []
+                },
+                {
+                    "output_column_name": "UPDATE_TM",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "TIME",
+                    "source_references": []
+                },
+                {
+                    "output_column_name": "LOAD_STATUS",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "'C'",
+                    "source_references": []
+                }
+            ],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "GRID_LOAD_ID = 'C01J02'",
+                    "involved_columns": [
+                        {
+                            "source_id": "target",
+                            "column_name": "GRID_LOAD_ID"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "s_id": "s11",
+            "statement_type": "UPDATE",
+            "target_table": {
+                "database_name": "CC_COBRA",
+                "schema_name": null,
+                "table_name": "CC_COBRA_LOAD_LOG",
+                "alias": null,
+                "inferred_target_type": "LOG_TABLE"
+            },
+            "sources": [],
+            "column_lineage": [
+                {
+                    "output_column_name": "LOAD_STATUS",
+                    "output_column_ordinal": null,
+                    "transformation_logic": "'F'",
+                    "source_references": []
+                }
+            ],
+            "joins": [],
+            "filters": [
+                {
+                    "clause": "WHERE",
+                    "filter_expression": "GRID_LOAD_ID = 'C01J02'",
+                    "involved_columns": [
+                        {
+                            "source_id": "target",
+                            "column_name": "GRID_LOAD_ID"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
