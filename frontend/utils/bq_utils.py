@@ -531,37 +531,41 @@ def get_all_sql_extracts():
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
-def get_tables_for_qid(q_id: str) -> pd.DataFrame:
-    """Fetches all tables for a given q_id."""
+def get_tables_for_qid(q_ids: list[str]) -> pd.DataFrame:
+    """Fetches all tables for a given list of q_ids."""
     client = get_bq_client()
-    if not client or not q_id:
+    if not client or not q_ids:
         return pd.DataFrame()
 
     project_id = st.session_state.get("project_id", "r2d2-00")
     dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
     table_id = f"{project_id}.{dataset_id}.query_statements"
+    raw_sql_extracts_table_id = get_raw_sql_extracts_table_id()
 
     query = f"""
         SELECT DISTINCT
-            target_database_name,
-            target_schema_name,
-            target_table_name,
-            inferred_target_type
-        FROM `{table_id}`
-        WHERE q_id = @q_id
+            qs.q_id,
+            rse.file_name,
+            qs.target_database_name,
+            qs.target_schema_name,
+            qs.target_table_name,
+            qs.inferred_target_type
+        FROM `{table_id}` AS qs
+        LEFT JOIN `{raw_sql_extracts_table_id}` AS rse ON qs.q_id = rse.q_id
+        WHERE qs.q_id IN UNNEST(@q_ids)
         ORDER BY
-            inferred_target_type,
-            target_table_name
+            qs.inferred_target_type,
+            qs.target_table_name
     """
     job_config = bigquery.QueryJobConfig(
         query_parameters=[
-            bigquery.ScalarQueryParameter("q_id", "STRING", q_id),
+            bigquery.ArrayQueryParameter("q_ids", "STRING", q_ids),
         ]
     )
     try:
         return client.query(query, job_config=job_config).to_dataframe()
     except Exception as e:
-        st.error(f"Could not fetch tables for q_id {q_id}: {e}")
+        st.error(f"Could not fetch tables for q_ids {q_ids}: {e}")
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
@@ -659,4 +663,195 @@ def get_column_lineage_for_sids(q_ids: list[str], s_ids: list[str]) -> pd.DataFr
         return client.query(query, job_config=job_config).to_dataframe()
     except Exception as e:
         st.error(f"Could not fetch column lineage: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_recursive_lineage_for_tables(selected_target_tables: list) -> pd.DataFrame:
+    """Fetches the recursive column lineage for a given list of tables."""
+    client = get_bq_client()
+    if not client or not selected_target_tables:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+
+    struct_query_params = []
+    for table in selected_target_tables:
+        db_name = table.get("target_database_name")
+        schema_name = table.get("target_schema_name")
+        table_name = table.get("target_table_name")
+
+        # Create ScalarQueryParameter for each field in the struct
+        db_param = bigquery.ScalarQueryParameter("target_database_name", "STRING", db_name if pd.notna(db_name) else None)
+        schema_param = bigquery.ScalarQueryParameter("target_schema_name", "STRING", schema_name if pd.notna(schema_name) else None)
+        table_param = bigquery.ScalarQueryParameter("target_table_name", "STRING", table_name if pd.notna(table_name) else None)
+
+        # Create a StructQueryParameter for the current table entry
+        struct_query_params.append(
+            bigquery.StructQueryParameter(None, db_param, schema_param, table_param)
+        )
+
+    query = f"""        WITH RECURSIVE
+        all_column_links AS (
+          -- This CTE flattens all known column links from your metadata
+          SELECT
+            q.q_id,
+            q.s_id,
+            q.target_database_name,
+            q.target_schema_name,
+            q.target_table_name,
+            l.output_column_name AS target_column_name,
+            l.transformation_logic,
+            s.source_database_name,
+            s.source_schema_name,
+            s.source_table_name,
+            source_ref.column_name AS source_column_name,
+            s.source_type
+          FROM
+            `{project_id}.{dataset_id}.query_statements` AS q
+          JOIN
+            `{project_id}.{dataset_id}.column_lineage` AS l
+            ON q.q_id = l.q_id AND q.s_id = l.s_id
+          LEFT JOIN
+            UNNEST(l.source_references) AS source_ref
+          LEFT JOIN
+            `{project_id}.{dataset_id}.statement_sources` AS s
+            ON q.q_id = s.q_id
+            AND q.s_id = s.s_id
+            AND source_ref.source_id = s.source_id
+        ),
+
+        selected_tables AS (
+          -- This CTE unnests the array of tables selected by the user in the UI
+          SELECT t.*
+          FROM UNNEST(@selected_target_tables) AS t
+          -- @selected_target_tables will be an ARRAY<STRUCT<...>>
+        ),
+
+        lineage_trace AS (
+          -- === ANCHOR MEMBER (Level 1) ===
+          -- This starts the trace from the tables the user selected
+          SELECT
+            1 AS depth,
+            lnk.q_id,
+            lnk.s_id,
+            lnk.target_database_name,
+            lnk.target_schema_name,
+            lnk.target_table_name,
+            lnk.target_column_name,
+            lnk.transformation_logic,
+            lnk.source_database_name,
+            lnk.source_schema_name,
+            lnk.source_table_name,
+            lnk.source_column_name,
+            lnk.source_type,
+            -- This path array is used to prevent infinite loops
+            [
+              COALESCE(lnk.target_database_name, '') || '.' ||
+              COALESCE(lnk.target_table_name, '') || '.' ||
+              COALESCE(lnk.target_column_name, '')
+            ] AS trace_path
+          FROM
+            all_column_links AS lnk
+          -- This JOIN is the dynamic part
+          JOIN
+            selected_tables AS s
+            ON lnk.target_database_name = s.target_database_name
+            AND lnk.target_table_name = s.target_table_name
+            -- IS NOT DISTINCT FROM safely handles NULL schema names
+            AND lnk.target_schema_name IS NOT DISTINCT FROM s.target_schema_name
+
+          UNION ALL
+
+          -- === RECURSIVE MEMBER (Level 2+) ===
+          -- This "hops" from the previous step's source to the next step's target
+          SELECT
+            prev_hop.depth + 1,
+            next_hop.q_id,
+            next_hop.s_id,
+            next_hop.target_database_name,
+            next_hop.target_schema_name,
+            next_hop.target_table_name,
+            next_hop.target_column_name,
+            next_hop.transformation_logic,
+            next_hop.source_database_name,
+            next_hop.source_schema_name,
+            next_hop.source_table_name,
+            next_hop.source_column_name,
+            next_hop.source_type,
+            -- Add the current hop to our path
+            ARRAY_CONCAT(
+              prev_hop.trace_path,
+              [
+                COALESCE(next_hop.target_database_name, '') || '.' ||
+                COALESCE(next_hop.target_table_name, '') || '.' ||
+                COALESCE(next_hop.target_column_name, '')
+              ]
+            ) AS trace_path
+          FROM
+            all_column_links AS next_hop
+          JOIN
+            lineage_trace AS prev_hop
+            -- This is the "HOP"
+            ON next_hop.target_database_name = prev_hop.source_database_name
+            AND next_hop.target_table_name = prev_hop.source_table_name
+            AND next_hop.target_column_name = prev_hop.source_column_name
+            AND next_hop.target_schema_name IS NOT DISTINCT FROM prev_hop.source_schema_name
+          WHERE
+            -- Cycle Prevention
+            (
+              COALESCE(next_hop.target_database_name, '') || '.' ||
+              COALESCE(next_hop.target_table_name, '') || '.' ||
+              COALESCE(next_hop.target_column_name, '')
+            )
+            NOT IN UNNEST(prev_hop.trace_path)
+        )
+
+        /*
+        Step 3: Select the final, complete lineage trace
+        */
+        SELECT
+          depth,
+          q_id,
+          s_id,
+          target_database_name,
+          target_schema_name,
+          target_table_name,
+          target_column_name AS target_column,
+          transformation_logic,
+          source_database_name,
+          source_schema_name,
+          source_table_name,
+          source_column_name AS source_column,
+          source_type,
+          trace_path
+        FROM
+          lineage_trace
+        -- Order by the path and depth to see each trace from start to finish
+        ORDER BY
+          depth;
+    """
+
+    # Define the type of the STRUCTs within the ARRAY
+    struct_type = bigquery.StructQueryParameterType(
+        bigquery.ScalarQueryParameterType('STRING', name='target_database_name'),
+        bigquery.ScalarQueryParameterType('STRING', name='target_schema_name'),
+        bigquery.ScalarQueryParameterType('STRING', name='target_table_name')
+    )
+
+    # Create the ArrayQueryParameter
+    selected_tables_param = bigquery.ArrayQueryParameter(
+        'selected_target_tables',
+        struct_type,
+        struct_query_params  # Use the list of StructQueryParameter objects
+    )
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[selected_tables_param]
+    )
+
+    try:
+        return client.query(query, job_config=job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch recursive lineage: {e}")
         return pd.DataFrame()

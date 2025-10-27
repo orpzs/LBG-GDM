@@ -46,6 +46,7 @@ htmldocx = "*"
 streamlit-mermaid = "*"
 pandas-gbq = "^0.29.2"
 google-cloud-bigquery-storage = "^2.33.1"
+graphviz = "^0.20.1"
 
 [tool.poetry.group.dev.dependencies]
 pre-commit = "^3.7.0"

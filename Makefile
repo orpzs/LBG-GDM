@@ -55,12 +55,12 @@ dev-frontend:
 
 build-backend:
 	@eval $$(python config/load_env.py) && \
-	gcloud builds submit --tag "${REGION}-docker.pkg.dev/${PROJECT_ID}/usecases/tddgen-backend:latest" .
+	gcloud builds submit --tag "${REGION}-docker.pkg.dev/${PROJECT_ID}/usecases/gdm-backend:latest" .
 
 deploy-backend:
 	@eval $$(python config/load_env.py) && \
-	gcloud run deploy "tdd-generation-backend" \
-  --image "${REGION}-docker.pkg.dev/${PROJECT_ID}/usecases/tddgen-backend:latest" \
+	gcloud run deploy "gdm-backend" \
+  --image "${REGION}-docker.pkg.dev/${PROJECT_ID}/usecases/gdm-backend:latest" \
   --platform managed \
   --region "${REGION}" \
   --port 8080 \
@@ -77,9 +77,9 @@ build-frontend:
 
 deploy-frontend:
 	@eval $$(python config/load_env.py) && \
-	export BACKEND_URL=$$(gcloud run services describe tdd-generation-backend --platform managed --region ${REGION} --format 'value(status.url)') && \
-	gcloud run deploy "tdd-generation-frontend" \
-	  --image "${REGION}-docker.pkg.dev/${PROJECT_ID}/usecases/tddgen-frontend:latest" \
+	export BACKEND_URL=$$(gcloud run services describe gdm-backend --platform managed --region ${REGION} --format 'value(status.url)') && \
+	gcloud run deploy "gdm-frontend" \
+	  --image "${REGION}-docker.pkg.dev/${PROJECT_ID}/usecases/gdm-frontend:latest" \
 	  --platform managed \
 	  --region "${REGION}" \
 	  --port 8000 \
