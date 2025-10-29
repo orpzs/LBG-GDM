@@ -1,8 +1,10 @@
 import streamlit as st
+from utils.init import init_session_state
+
+init_session_state()
 import sys
 import os
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
-from frontend.utils.bq_utils import (
+from utils.bq_utils import (
     create_guidelines_table_if_not_exists,
     get_all_guidelines,
     add_guideline,

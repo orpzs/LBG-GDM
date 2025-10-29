@@ -56,7 +56,7 @@ def extract_sql_details(sql_query, file_path=None):
         ##Change the prompt accordinly to extract various details
         
         extraction_prompt = f"""
-You are an expert SQL parser. Your task is to analyze a multi-statement SQL script and extract a detailed, structured JSON representation of all its DML (Data Manipulation Language) operations.
+You are an expert SQL parser. Your task is to analyze a multi-statement SQL script and extract a detailed, structured JSON representation of all its DML (Data Manipulation Language) operations. These SQLs are from a Banking & Financial Institution.
 
 Instructions:
 
@@ -64,7 +64,8 @@ Instructions:
   - Ignore simple SELECT statements that are not part of a DML operation (e.g., SELECT * FROM... at the start of a script for a check).
   - The output must be a single JSON object.
   - The root of the JSON will contain a file_summary and a list called statements.
-  - Each item in the statements list represents one DML operation you found, in sequential order.       
+  - Each item in the statements list represents one DML operation you found, in sequential order.
+  - Throughout your entire response, you must resolve all table aliases (e.g., `T1`, `A`, `B`) back to their full, original table names database.table_name for the transformation logics.     
 
 Core Logic: Handling the SELECT part of a DML (Flattening Lineage)
 
@@ -86,7 +87,7 @@ Core Logic: Handling UNION / UNION ALL. When the DML's SELECT statement contains
 
   - All Sources: The sources array for this DML statement must include all unique "true" source tables from all branches of the UNION unqiuely. If firs select give src1, src2, src3 repeat them for second UNION select as well i.e. src4, src5, src6
 
-  - Branching Lineage: The column_lineage is where the UNION logic becomes visible. For a single output_column_name, column lineage would repeat to show each statement in the UNION 
+  - Branching Lineage: The column_lineage is where the UNION logic becomes visible. For a single output_column_name, transformation logic should be fully resolves but use the inferred_logic_detail to provide full detail with whole understanding of the statement with UNION itself.
 
 If the SQL script is invalid or contains no DML, return an empty JSON object: {{}}
 
@@ -103,6 +104,7 @@ JSON
   "statements": [
     {{
       "s_id": "A unique, sequential ID for this statement (e.g., 's1', 's2', 's3').",
+      "inferred_detail": "A natural language summary or inferred purpose of the statement.",
       "statement_type": "The DML command (e.g., 'UPDATE', 'INSERT', 'DELETE').",
       "target_table": {{
         "database_name": "The database of the table being written to.",
@@ -128,7 +130,8 @@ JSON
         {{
           "output_column_name": "The name of the column in the target table being populated. **This field is MANDATORY and MUST NOT be null for INSERTs or UPDATEs.**. ",
           "output_column_ordinal": "The 1-based integer position (1, 2, 3...) for 'INSERT' columns. Should be null for 'UPDATE' columns.",
-          "transformation_logic": "The full expression or logic used to derive the column (e.g., 'A.RUN_ID', 'CASE WHEN V.VERDE_IN...', '0').",
+          "transformation_logic": "The full expression or logic used to derive the column with all aliases resolved.",
+          "inferred_logic_detail": "Based on the overall statement how is this column populated business logic wise?",
           "source_references": [
             // This array should be empty if the transformation_logic is a constant (e.g., '0' or 'I').
             // It MUST point to the 'source_id' of a 'true' source from the 'sources' array above.

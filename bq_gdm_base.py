@@ -38,6 +38,7 @@ def run_bigquery_ddl():
        CREATE OR REPLACE TABLE `r2d2-00.gdm.query_statements` (
             q_id STRING OPTIONS (description = "Foreign Key. Links to the parent file in raw_sql_extracts."),
             s_id STRING OPTIONS (description = "Primary Key (composite). A unique ID for this specific statement within the file (e.g., s1, s2)."),
+            inferred_detail STRING OPTIONS (description = "A natural language summary or inferred purpose of the statement."),
             statement_type STRING OPTIONS (description = "The DML type (INSERT, UPDATE, DELETE, CREATE_TABLE_AS_SELECT)."),
             target_database_name STRING OPTIONS (description = "The database of the table being modified."),
             target_schema_name STRING OPTIONS (description = "The schema of the table being modified."),
@@ -71,6 +72,7 @@ def run_bigquery_ddl():
             output_column_name STRING OPTIONS (description = "The final name of the column being inserted or updated."),
             output_column_ordinal INT64 OPTIONS (description = "The position of the column in the SELECT list (1, 2, 3, ...)."),
             transformation_logic STRING OPTIONS (description = "The full expression or function used to create the column."),
+            inferred_logic_detail STRING OPTIONS (description = "A natural language summary or inferred purpose how this column is populated"),
             source_references ARRAY<STRUCT<source_id STRING, column_name STRING>> OPTIONS (description = "Links to the specific source table (via source_id) and column name that feeds this output column.")
         ) OPTIONS (
             description = "Core column-level lineage, mapping statement outputs to specific statement sources.",

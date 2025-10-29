@@ -614,6 +614,8 @@ def get_sources_for_sids(q_ids: list[str], s_ids: list[str]) -> pd.DataFrame:
         SELECT
             q_id,
             s_id,
+            source_id,
+            source_database_name,
             source_table_name,
             source_alias,
             source_type
@@ -666,7 +668,7 @@ def get_column_lineage_for_sids(q_ids: list[str], s_ids: list[str]) -> pd.DataFr
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
-def get_recursive_lineage_for_tables(selected_target_tables: list) -> pd.DataFrame:
+def get_recursive_lineage_for_tables(selected_target_tables: list, selected_qids: list[str]) -> pd.DataFrame:
     """Fetches the recursive column lineage for a given list of tables."""
     client = get_bq_client()
     if not client or not selected_target_tables:
@@ -719,6 +721,7 @@ def get_recursive_lineage_for_tables(selected_target_tables: list) -> pd.DataFra
             ON q.q_id = s.q_id
             AND q.s_id = s.s_id
             AND source_ref.source_id = s.source_id
+          WHERE q.q_id IN UNNEST(@selected_qids)
         ),
 
         selected_tables AS (
@@ -846,8 +849,14 @@ def get_recursive_lineage_for_tables(selected_target_tables: list) -> pd.DataFra
         struct_query_params  # Use the list of StructQueryParameter objects
     )
 
+    qids_param = bigquery.ArrayQueryParameter(
+        'selected_qids',
+        'STRING',
+        selected_qids
+    )
+
     job_config = bigquery.QueryJobConfig(
-        query_parameters=[selected_tables_param]
+        query_parameters=[selected_tables_param, qids_param]
     )
 
     try:
@@ -855,3 +864,140 @@ def get_recursive_lineage_for_tables(selected_target_tables: list) -> pd.DataFra
     except Exception as e:
         st.error(f"Could not fetch recursive lineage: {e}")
         return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_all_source_tables() -> pd.DataFrame:
+    """Fetches all distinct source tables from the statement_sources table."""
+    client = get_bq_client()
+    if not client:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    table_id = f"{project_id}.{dataset_id}.statement_sources"
+
+    query = f"""
+        SELECT DISTINCT
+            source_database_name,
+            source_table_name
+        FROM `{table_id}`
+        WHERE source_table_name IS NOT NULL
+        ORDER BY 1, 2
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch source tables: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_source_column_usage() -> pd.DataFrame:
+    """Calculates the usage count for each source column."""
+    client = get_bq_client()
+    if not client:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    lineage_table = f"{project_id}.{dataset_id}.column_lineage"
+    sources_table = f"{project_id}.{dataset_id}.statement_sources"
+
+    query = f"""
+        SELECT
+            s.source_database_name,
+            s.source_table_name,
+            ref.column_name,
+            COUNT(*) AS usage_count
+        FROM
+            `{lineage_table}` AS l,
+            UNNEST(l.source_references) AS ref
+        JOIN
+            `{sources_table}` AS s
+            ON l.q_id = s.q_id AND l.s_id = s.s_id AND ref.source_id = s.source_id
+        WHERE
+            s.source_table_name IS NOT NULL AND ref.column_name IS NOT NULL
+        GROUP BY 1, 2, 3
+        ORDER BY 1, 2, 3
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch source column usage: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
+def get_all_joins() -> pd.DataFrame:
+    """Fetches all joins from the statement_joins table and counts their occurrences."""
+    client = get_bq_client()
+    if not client:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+    joins_table = f"{project_id}.{dataset_id}.statement_joins"
+    sources_table = f"{project_id}.{dataset_id}.statement_sources"
+
+    query = f"""
+        SELECT
+            ls.source_database_name AS left_database_name,
+            ls.source_table_name AS left_table_name,
+            jc.left_column,
+            rs.source_database_name AS right_database_name,
+            rs.source_table_name AS right_table_name,
+            jc.right_column,
+            j.join_type,
+            jc.operator,
+            COUNT(*) AS usage_count
+        FROM
+            `{joins_table}` AS j,
+            UNNEST(j.join_conditions) AS jc
+        JOIN
+            `{sources_table}` AS ls
+            ON j.q_id = ls.q_id AND j.s_id = ls.s_id AND j.left_source_id = ls.source_id
+        JOIN
+            `{sources_table}` AS rs
+            ON j.q_id = rs.q_id AND j.s_id = rs.s_id AND j.right_source_id = rs.source_id
+        WHERE
+            ls.source_table_name IS NOT NULL AND rs.source_table_name IS NOT NULL
+        GROUP BY 1, 2, 3, 4, 5, 6, 7, 8
+        ORDER BY usage_count DESC
+    """
+    try:
+        return client.query(query).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch joins: {e}")
+        return pd.DataFrame()
+
+def insert_raw_sql_extract_placeholder(q_id: str, file_name: str):
+    """Inserts a placeholder record into the raw_sql_extracts table with 'PARSING' status."""
+    client = get_bq_client()
+    if not client:
+        st.warning("BigQuery client not available. Skipping placeholder insert.")
+        return False
+
+    table_id = get_raw_sql_extracts_table_id()
+
+    # Use MERGE to avoid errors if the record already exists
+    merge_query = f"""
+    MERGE `{table_id}` T
+    USING (SELECT @q_id AS q_id) S
+    ON T.q_id = S.q_id
+    WHEN NOT MATCHED THEN
+      INSERT (q_id, raw_sql_path, file_name, processing_status, inserted_at)
+      VALUES (@q_id, @file_name, @file_name, 'PARSING', @inserted_at)
+    """
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[
+            bigquery.ScalarQueryParameter("q_id", "STRING", q_id),
+            bigquery.ScalarQueryParameter("file_name", "STRING", file_name),
+            bigquery.ScalarQueryParameter("inserted_at", "TIMESTAMP", datetime.now(timezone.utc)),
+        ]
+    )
+
+    try:
+        client.query(merge_query, job_config=job_config).result()
+        return True
+    except Exception as e:
+        st.error(f"Failed to insert placeholder for {file_name}: {e}")
+        return False

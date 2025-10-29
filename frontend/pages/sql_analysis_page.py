@@ -1,11 +1,15 @@
 import streamlit as st
+from utils.init import init_session_state
+
+init_session_state()
 import requests
 import os
 import json
 import pandas as pd
 import hashlib
 import time
-from frontend.utils.bq_utils import get_sql_extract, insert_df_to_bq, update_processing_status, delete_analysis_data
+import re
+from utils.bq_utils import get_sql_extract, insert_df_to_bq, update_processing_status, delete_analysis_data, insert_raw_sql_extract_placeholder
 
 st.set_page_config(layout="wide")
 
@@ -25,21 +29,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if "analysis_running" not in st.session_state:
-    st.session_state.analysis_running = False
-if "parser_output" not in st.session_state:
-    st.session_state.parser_output = None
-if "error" not in st.session_state:
-    st.session_state.error = None
-if "q_id" not in st.session_state:
-    st.session_state.q_id = None
-if "uploaded_file_name" not in st.session_state:
-    st.session_state.uploaded_file_name = None
-if "processing_status" not in st.session_state:
-    st.session_state.processing_status = None
-if "uploaded_file" not in st.session_state:
-    st.session_state.uploaded_file = None
+
+def sanitize_filename(name):
+    """
+    Sanitizes a filename by replacing special characters with spaces.
+    Keeps letters, numbers, dots, hyphens, and underscores.
+    """
+    return re.sub(r'[^a-zA-Z0-9._-]', ' ', name)
 
 def get_q_id(file_name):
     return hashlib.sha256(file_name.encode()).hexdigest()
@@ -90,6 +86,7 @@ def parse_and_load_data():
         query_statements_df = pd.DataFrame([{
             "q_id": q_id,
             "s_id": s_id,
+            "inferred_detail": statement.get("inferred_detail"),
             "statement_type": statement.get("statement_type"),
             "target_database_name": statement.get("target_table", {}).get("database_name"),
             "target_schema_name": statement.get("target_table", {}).get("schema_name"),
@@ -169,21 +166,20 @@ def parse_and_load_data():
         status_text.error("An error occurred during data loading. Please check the logs.")
 
 def handle_analysis(uploaded_file):
+    sanitized_name = sanitize_filename(uploaded_file.name)
     st.session_state.analysis_running = True
     st.session_state.parser_output = None
     st.session_state.error = None
-    st.session_state.uploaded_file_name = uploaded_file.name
-    st.session_state.q_id = get_q_id(uploaded_file.name)
+    st.session_state.uploaded_file_name = sanitized_name
+    st.session_state.q_id = get_q_id(sanitized_name)
     st.session_state.processing_status = None
     st.session_state.uploaded_file = uploaded_file
 
     try:
-        with st.spinner(f"Checking for existing analysis of {uploaded_file.name}..."):
-            extract = get_sql_extract(uploaded_file.name)
-            # print(extract)
+        with st.spinner(f"Checking for existing analysis of {sanitized_name}..."):
+            extract = get_sql_extract(sanitized_name)
             if extract:
                 st.session_state.processing_status = extract.get("processing_status")
-                # print("passed error get")
                 parser_output_str = extract.get("parser_output")
                 loaded_output = None
                 try:
@@ -203,19 +199,23 @@ def handle_analysis(uploaded_file):
                 st.session_state.analysis_running = False
                 return
 
-        with st.spinner(f"Performing new analysis of {uploaded_file.name}..."):
+        # Insert placeholder to prevent race conditions
+        with st.spinner(f"Initiating analysis for {sanitized_name}..."):
+            insert_raw_sql_extract_placeholder(st.session_state.q_id, sanitized_name)
+
+        with st.spinner(f"Performing new analysis of {sanitized_name}..."):
             fastapi_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/plain")}
+            files = {"file": (sanitized_name, uploaded_file.getvalue(), "text/plain")}
             response = requests.post(f"{fastapi_url}/sql_analysis_from_file", files=files)
             response.raise_for_status()
             
             for _ in range(3):
-                extract = get_sql_extract(uploaded_file.name)
+                extract = get_sql_extract(sanitized_name)
                 if extract:
                     st.session_state.processing_status = extract.get("processing_status")
                     if st.session_state.processing_status == "ERROR":
                         st.session_state.error = json.loads(extract.get("parser_output")).get("error")
-                    else:
+                    elif st.session_state.processing_status != "PARSING":
                         st.session_state.parser_output = json.loads(extract.get("parser_output"))
                     st.session_state.analysis_running = False
                     return
@@ -238,13 +238,13 @@ def handle_reanalysis():
     try:
         with st.spinner(f"Deleting existing analysis data for {st.session_state.uploaded_file_name}..."):
             delete_analysis_data(st.session_state.q_id)
-            # update_processing_status(st.session_state.q_id, "NEW")
             st.session_state.processing_status = "NEW"
 
         with st.spinner(f"Performing new analysis of {st.session_state.uploaded_file_name}..."):
             uploaded_file = st.session_state.uploaded_file
+            sanitized_name = st.session_state.uploaded_file_name
             fastapi_url = os.environ.get("API_BASE_URL", "http://localhost:8000")
-            files = {"file": (uploaded_file.name, uploaded_file.getvalue(), "text/plain")}
+            files = {"file": (sanitized_name, uploaded_file.getvalue(), "text/plain")}
             response = requests.post(f"{fastapi_url}/sql_analysis_from_file", files=files)
             response.raise_for_status()
             
@@ -254,7 +254,6 @@ def handle_reanalysis():
                     st.session_state.parser_output = json.loads(extract.get("parser_output"))
                     st.session_state.processing_status = extract.get("processing_status")
                     st.session_state.analysis_running = False
-                    st.rerun()
                     return
                 time.sleep(2)
 
@@ -267,23 +266,44 @@ def handle_reanalysis():
     
     st.session_state.analysis_running = False
 
+def clear_analysis_state():
+    st.session_state.parser_output = None
+    st.session_state.analysis_running = False
+    st.session_state.q_id = None
+    st.session_state.error = None
+    st.session_state.processing_status = None
+    st.session_state.uploaded_file_name = None
+    st.session_state.uploaded_file = None
+    st.session_state.file_uploader_key += 1
+    st.rerun()
 
 # --- Main UI ---
 
-uploaded_file = st.file_uploader("Choose a .sql file", type="sql", key="file_uploader")
+uploaded_files = st.file_uploader("Choose .sql files", type="sql", key=f"file_uploader_{st.session_state.file_uploader_key}", accept_multiple_files=True)
+
+selected_file = None
+if uploaded_files:
+    file_map = {sanitize_filename(f.name): f for f in uploaded_files}
+    sanitized_file_names = list(file_map.keys())
+
+    if len(sanitized_file_names) != len(set(sanitized_file_names)):
+        st.warning("Warning: Some files have the same name after sanitization. Please rename them to avoid conflicts.")
+
+    selected_sanitized_name = st.radio("Select a file to analyze:", sanitized_file_names)
+    selected_file = file_map.get(selected_sanitized_name)
+
 
 # Top-level buttons
 
 col1, col2 = st.columns(2)
 
 with col1:
-    if st.button("Analyze SQL", key="analyze_sql", use_container_width=True, disabled=(uploaded_file is None or st.session_state.analysis_running or st.session_state.parser_output is not None)):
-        handle_analysis(uploaded_file)
+    if st.button("Analyze SQL", key="analyze_sql", use_container_width=True, disabled=(selected_file is None or st.session_state.analysis_running or st.session_state.parser_output is not None)):
+        handle_analysis(selected_file)
 
 with col2:
     if st.button("Analyze another file", key="analyze_another", use_container_width=True, disabled=(st.session_state.parser_output is None)):
-        st.session_state.clear()
-        st.rerun()
+        clear_analysis_state()
 
 if st.session_state.analysis_running:
     st.info("Analysis in progress...")

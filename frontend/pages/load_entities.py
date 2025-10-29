@@ -1,4 +1,7 @@
 import streamlit as st
+from utils.init import init_session_state
+
+init_session_state()
 import xml.etree.ElementTree as ET
 import logging
 import re
