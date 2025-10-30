@@ -26,8 +26,11 @@ st.header("Source Column Usage")
 
 @st.cache_data
 def get_all_tables():
-    """Fetches all unique source tables."""
-    return get_all_source_tables()
+    """Fetches all unique source tables and aggregates the file names."""
+    df = get_all_source_tables()
+    if not df.empty:
+        df = df.groupby(['source_database_name', 'source_table_name'])['file_name'].agg(lambda x: ', '.join(sorted(set(x)))).reset_index()
+    return df
 
 all_tables_df = get_all_tables()
 
@@ -39,6 +42,7 @@ if all_tables_df.empty:
 rename_map = {
     "source_database_name": "Database",
     "source_table_name": "Table",
+    "file_name": "Referred in Files",
 }
 display_tables_df = all_tables_df.rename(columns=rename_map)
 
@@ -63,7 +67,7 @@ edited_tables_df = st.data_editor(
             width="small"
         )
     },
-    disabled=["Database", "Table"],
+    disabled=["Database", "Table", "Referred in Files"],
     key="tables_selector"
 )
 

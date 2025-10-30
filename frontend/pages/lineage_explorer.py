@@ -45,8 +45,8 @@ def generate_lineage_graph(lineage_df: pd.DataFrame) -> graphviz.Digraph:
     """
     try:
         dot = graphviz.Digraph(comment='End-to-End Lineage')
-        dot.attr(rankdir='LR')  # Left-to-Right layout
-        dot.attr('graph', size='25,25!')  # Increase graph size for better readability
+        dot.attr(rankdir='RL')  # Left-to-Right layout
+        dot.attr('graph', size='100,100!')  # Increase graph size for better readability
 
         def get_full_name(row, prefix):
             # Use .get() to avoid KeyErrors if a column is missing
@@ -85,6 +85,7 @@ def generate_lineage_graph(lineage_df: pd.DataFrame) -> graphviz.Digraph:
 
 
         # Add all edges
+        edges = set()
         for _, row in lineage_df.iterrows():
             if pd.notna(row.get("source_table_name")):
                 target_table = get_full_name(row, 'target')
@@ -92,22 +93,28 @@ def generate_lineage_graph(lineage_df: pd.DataFrame) -> graphviz.Digraph:
                 target_node_id = f'{target_table}.{row.get("target_column")}'
                 source_node_id = f'{source_table}.{row.get("source_column")}'
                 
-                edge_label = f'Depth: {row.get("depth", "N/A")}'
+                edge = (source_node_id, target_node_id)
+                if edge not in edges:
+                    edge_label = f'Depth: {row.get("depth", "N/A")}'
 
-                dot.edge(
-                    source_node_id, 
-                    target_node_id, 
-                    label=edge_label
-                )
+                    dot.edge(
+                        source_node_id, 
+                        target_node_id, 
+                        label=edge_label
+                    )
+                    edges.add(edge)
 
                 file_name = row.get("file_name")
                 if pd.notna(file_name):
-                    dot.edge(
-                        file_name,
-                        source_node_id,
-                        style='dotted',
-                        arrowhead='none'
-                    )
+                    file_edge = (file_name, source_node_id)
+                    if file_edge not in edges:
+                        dot.edge(
+                            file_name,
+                            source_node_id,
+                            style='dotted',
+                            arrowhead='none'
+                        )
+                        edges.add(file_edge)
                 
         return dot
     except Exception as e:
@@ -236,63 +243,27 @@ if st.session_state.get('show_tables', False):
                     how='left'
                 )
 
-                # 2. Data for Detailed View Tab (Collapsed Lineage)
+                # 2. Data for Detailed View Tab (Full Lineage)
+                # We will display the full lineage trace, including intermediate tables.
                 lineage_df_copy = lineage_trace_df.copy()
-
-                def is_intermediate(table_name):
-                    if not isinstance(table_name, str): return False
-                    return 'WK_' in table_name or 'TEMP_' in table_name
-
-                parent_of = {}
-                for _, row in lineage_df_copy.iterrows():
-                    target_id = (row['target_table_name'], row['target_column'])
-                    source_id = (row['source_table_name'], row['source_column'])
-                    parent_of[target_id] = (source_id, row.to_dict())
-
-                @st.cache_data
-                def find_ultimate_parent(child_id_tuple):
-                    if child_id_tuple not in parent_of:
-                        return (None, None), None
-                    
-                    parent_id, parent_row_dict = parent_of[child_id_tuple]
-                    
-                    if not parent_id[0] or not is_intermediate(parent_id[0]):
-                        return parent_id, parent_row_dict
-                    else:
-                        return find_ultimate_parent(parent_id)
-
-                collapsed_rows = []
-                for _, row in lineage_df_copy.iterrows():
-                    if not is_intermediate(row['target_table_name']):
-                        child_id = (row['target_table_name'], row['target_column'])
-                        ultimate_parent_id, ultimate_parent_row_dict = find_ultimate_parent(child_id)
-                        
-                        new_row = row.to_dict()
-                        if ultimate_parent_id and ultimate_parent_id[0] and ultimate_parent_row_dict:
-                            new_row['source_table_name'] = ultimate_parent_row_dict['source_table_name']
-                            new_row['source_column'] = ultimate_parent_row_dict['source_column']
-                            new_row['source_database_name'] = ultimate_parent_row_dict['source_database_name']
-                            new_row['source_schema_name'] = ultimate_parent_row_dict['source_schema_name']
-                            new_row['depth'] = 'Collapsed'
-                        
-                        collapsed_rows.append(new_row)
-
-                collapsed_df = pd.DataFrame()
-                if collapsed_rows:
-                    df = pd.DataFrame(collapsed_rows)
-                    subset_cols = [
-                        'target_database_name', 'target_schema_name', 'target_table_name', 'target_column',
-                        'source_database_name', 'source_schema_name', 'source_table_name', 'source_column'
-                    ]
-                    existing_subset_cols = [col for col in subset_cols if col in df.columns]
-                    collapsed_df = df.drop_duplicates(subset=existing_subset_cols).reset_index(drop=True)
-
-                collapsed_lineage_for_display = pd.merge(
-                    collapsed_df,
+                
+                # Merge file_name into the lineage trace
+                display_df = pd.merge(
+                    lineage_df_copy,
                     extracts_df[['q_id', 'file_name']],
                     on='q_id',
                     how='left'
                 )
+
+                # Drop q_id as it's no longer needed for display
+                if 'q_id' in display_df.columns:
+                    display_df = display_df.drop(columns=['q_id'])
+
+                # Sort the data for better readability
+                display_df = display_df.sort_values(by=["target_table_name", "target_column"])
+                
+                # Data for download
+                expanded_lineage_for_display = display_df
 
                 # --- Create Tabs ---
                 tab1, tab2 = st.tabs(["📊 Lineage Graph", "📋 Detailed View"])
@@ -307,16 +278,14 @@ if st.session_state.get('show_tables', False):
                         st.info("No lineage data to graph.")
 
                 with tab2:
-                    st.subheader("Collapsed Lineage Table")
-                    
-                    display_df = collapsed_lineage_for_display
+                    st.subheader("Detailed Lineage Table")
                     
                     if not display_df.empty:
                         # Define columns to display
                         cols_to_display = [
                             "file_name",
-                            "target_database_name", "target_schema_name", "target_table_name", "target_column",
-                            "source_database_name", "source_schema_name", "source_table_name", "source_column",
+                            "target_database_name",  "target_table_name", "target_column",
+                            "source_database_name",  "source_table_name", "source_column","inferred_logic_detail",
                             "transformation_logic"
                         ]
                         
@@ -327,14 +296,16 @@ if st.session_state.get('show_tables', False):
                         rename_map = {
                             "file_name": "File Name",
                             "target_database_name": "Target DB",
-                            "target_schema_name": "Target Schema",
+                            # "target_schema_name": "Target Schema",
                             "target_table_name": "Target Table",
                             "target_column": "Target Column",
                             "source_database_name": "Source DB",
-                            "source_schema_name": "Source Schema",
+                            # "source_schema_name": "Source Schema",
                             "source_table_name": "Source Table",
                             "source_column": "Source Column",
+                            "inferred_logic_detail": "Inferred Logic",
                             "transformation_logic": "Logic",
+                            
                         }
                         
                         # Rename the columns that exist
@@ -344,18 +315,18 @@ if st.session_state.get('show_tables', False):
                         existing_cols_new_names = [rename_map.get(col, col) for col in existing_cols_original_names]
 
                         # Display the dataframe
-                        st.dataframe(display_df_renamed[existing_cols_new_names], use_container_width=True)
+                        st.dataframe(display_df_renamed[existing_cols_new_names], use_container_width=True, hide_index=True)
                     else:
                         st.info("No lineage details to display.")
                 
                 # --- DOWNLOAD OPTIONS ---
                 st.subheader("Download Lineage Data")
                 
-                csv_data = collapsed_lineage_for_display.to_csv(index=False).encode('utf-8')
+                csv_data = expanded_lineage_for_display.to_csv(index=False).encode('utf-8')
                 st.download_button(
-                    label="📥 Download Collapsed Lineage as CSV",
+                    label="📥 Download Detailed Lineage as CSV",
                     data=csv_data,
-                    file_name="collapsed_column_lineage.csv",
+                    file_name="detailed_column_lineage.csv",
                     mime="text/csv",
                 )
 

@@ -65,7 +65,9 @@ Instructions:
   - The output must be a single JSON object.
   - The root of the JSON will contain a file_summary and a list called statements.
   - Each item in the statements list represents one DML operation you found, in sequential order.
-  - Throughout your entire response, you must resolve all table aliases (e.g., `T1`, `A`, `B`) back to their full, original table names database.table_name for the transformation logics.     
+  - Throughout your entire response, you must resolve all table aliases (e.g., `T1`, `A`, `B`) back to their full, original table names database.table_name for the transformation logics.
+  - Always resolve the SELECT * as well. if the DDL is present in the script resolve each of the column if not 
+  - **You to need uppercase all the relevant query responses like Column name, transformation logic etc.** 
 
 Core Logic: Handling the SELECT part of a DML (Flattening Lineage)
 
@@ -128,10 +130,10 @@ JSON
       // This should repeat for the same column when its for UNION
      "column_lineage": [
         {{
-          "output_column_name": "The name of the column in the target table being populated. **This field is MANDATORY and MUST NOT be null for INSERTs or UPDATEs.**. ",
+          "output_column_name": "The name of the column in the target table being populated. Do not assume any different column name you need to use the same name what is present for the INSERT.**This field is MANDATORY and MUST NOT be null for INSERTs or UPDATEs.**. ",
           "output_column_ordinal": "The 1-based integer position (1, 2, 3...) for 'INSERT' columns. Should be null for 'UPDATE' columns.",
-          "transformation_logic": "The full expression or logic used to derive the column with all aliases resolved.",
-          "inferred_logic_detail": "Based on the overall statement how is this column populated business logic wise?",
+          "transformation_logic": "The full expression or logic used to derive the column with all aliases resolved. Always resolve the aliases in the logic with corresponding source database and table name e.g.table_database.table_name,
+          "inferred_logic_detail": "Based on the overall statement how is this column populated business logic wise?. For Non direct one to one mapping just mention as direct mapping from source column. For Sub query or CTE just talk about what kind of joins and filter logic is actually making this",
           "source_references": [
             // This array should be empty if the transformation_logic is a constant (e.g., '0' or 'I').
             // It MUST point to the 'source_id' of a 'true' source from the 'sources' array above.
@@ -149,19 +151,21 @@ JSON
           "left_source_id": "The 'source_id' of the table on the left.",
           "right_source_id": "The 'source_id' of the table on the right.",
           "join_conditions": [
+          // Below contiion should cover all the multiple conditions e.g. ON A.COLUMN = B.COLUMN AND C.COLUMN = D.COLUMN
             {{
               "left_source_id": "The 'source_id' for the left side of the condition.",
               "left_column": "The column name from the left-side table.",
               "operator": "The comparison operator (e.g., '=', '<=').",
               "right_source_id": "The 'source_id' for the right side of the condition.",
               "right_column": "The column name from the right-side table."
+              // repeat this for each condtion between sane table.
             }}
           ]
         }}
       ],
       "filters": [
         {{
-          "clause": "The clause where the filter is applied (e.g., 'WHERE', 'ON', 'HAVING').",
+          "clause": "The clause where the filter is applied (WHERE condition filter only) **Note that 'ON' clause is not for filters and ON clause would go on into the join coditions above**",
           "filter_expression": "The full text of the filter condition.",
           "involved_columns": [
             {{

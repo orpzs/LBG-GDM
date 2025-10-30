@@ -693,7 +693,8 @@ def get_recursive_lineage_for_tables(selected_target_tables: list, selected_qids
             bigquery.StructQueryParameter(None, db_param, schema_param, table_param)
         )
 
-    query = f"""        WITH RECURSIVE
+    query = f"""  
+    WITH RECURSIVE
         all_column_links AS (
           -- This CTE flattens all known column links from your metadata
           SELECT
@@ -703,6 +704,7 @@ def get_recursive_lineage_for_tables(selected_target_tables: list, selected_qids
             q.target_schema_name,
             q.target_table_name,
             l.output_column_name AS target_column_name,
+            l.inferred_logic_detail,
             l.transformation_logic,
             s.source_database_name,
             s.source_schema_name,
@@ -742,6 +744,7 @@ def get_recursive_lineage_for_tables(selected_target_tables: list, selected_qids
             lnk.target_schema_name,
             lnk.target_table_name,
             lnk.target_column_name,
+            lnk.inferred_logic_detail,
             lnk.transformation_logic,
             lnk.source_database_name,
             lnk.source_schema_name,
@@ -776,6 +779,7 @@ def get_recursive_lineage_for_tables(selected_target_tables: list, selected_qids
             next_hop.target_schema_name,
             next_hop.target_table_name,
             next_hop.target_column_name,
+            next_hop.inferred_logic_detail,
             next_hop.transformation_logic,
             next_hop.source_database_name,
             next_hop.source_schema_name,
@@ -821,6 +825,7 @@ def get_recursive_lineage_for_tables(selected_target_tables: list, selected_qids
           target_schema_name,
           target_table_name,
           target_column_name AS target_column,
+          inferred_logic_detail,
           transformation_logic,
           source_database_name,
           source_schema_name,
@@ -874,14 +879,18 @@ def get_all_source_tables() -> pd.DataFrame:
 
     project_id = st.session_state.get("project_id", "r2d2-00")
     dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
-    table_id = f"{project_id}.{dataset_id}.statement_sources"
+    sources_table_id = f"{project_id}.{dataset_id}.statement_sources"
+    raw_sql_extracts_table_id = get_raw_sql_extracts_table_id()
+
 
     query = f"""
         SELECT DISTINCT
-            source_database_name,
-            source_table_name
-        FROM `{table_id}`
-        WHERE source_table_name IS NOT NULL
+            ss.source_database_name,
+            ss.source_table_name,
+            rse.file_name
+        FROM `{sources_table_id}` as ss
+        JOIN `{raw_sql_extracts_table_id}` as rse on ss.q_id = rse.q_id
+        WHERE ss.source_table_name IS NOT NULL
         ORDER BY 1, 2
     """
     try:
