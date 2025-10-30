@@ -871,6 +871,263 @@ def get_recursive_lineage_for_tables(selected_target_tables: list, selected_qids
         return pd.DataFrame()
 
 @st.cache_data(ttl=3600)
+def get_detailed_lineage_for_tables(selected_target_tables: list, selected_qids: list[str]) -> pd.DataFrame:
+    """Fetches the detailed column lineage for a given list of tables, including full path information."""
+    client = get_bq_client()
+    if not client or not selected_target_tables:
+        return pd.DataFrame()
+
+    project_id = st.session_state.get("project_id", "r2d2-00")
+    dataset_id = st.session_state.get("guidelines_bq_dataset", "gdm")
+
+    struct_query_params = []
+    for table in selected_target_tables:
+        db_name = table.get("target_database_name")
+        schema_name = table.get("target_schema_name")
+        table_name = table.get("target_table_name")
+
+        db_param = bigquery.ScalarQueryParameter("target_database_name", "STRING", db_name if pd.notna(db_name) else None)
+        schema_param = bigquery.ScalarQueryParameter("target_schema_name", "STRING", schema_name if pd.notna(schema_name) else None)
+        table_param = bigquery.ScalarQueryParameter("target_table_name", "STRING", table_name if pd.notna(table_name) else None)
+
+        struct_query_params.append(
+            bigquery.StructQueryParameter(None, db_param, schema_param, table_param)
+        )
+
+    query = f"""
+    WITH RECURSIVE
+        all_column_links AS (
+          -- [This CTE is unchanged]
+          SELECT
+            q.q_id,
+            q.s_id,
+            q.target_database_name,
+            q.target_schema_name,
+            q.target_table_name,
+            l.output_column_name AS target_column_name,
+            l.inferred_logic_detail,
+            l.transformation_logic,
+            s.source_database_name,
+            s.source_schema_name,
+            s.source_table_name,
+            source_ref.column_name AS source_column_name,
+            s.source_type
+          FROM
+            `{project_id}.{dataset_id}.query_statements` AS q
+          JOIN
+            `{project_id}.{dataset_id}.column_lineage` AS l
+            ON q.q_id = l.q_id AND q.s_id = l.s_id
+          LEFT JOIN
+            UNNEST(l.source_references) AS source_ref
+          LEFT JOIN
+            `{project_id}.{dataset_id}.statement_sources` AS s
+            ON q.q_id = s.q_id
+            AND q.s_id = s.s_id
+            AND source_ref.source_id = s.source_id
+          WHERE q.q_id IN UNNEST(@selected_qids)
+        ),
+
+        selected_tables AS (
+          -- [This CTE is unchanged]
+          SELECT t.*
+          FROM UNNEST(@selected_target_tables) AS t
+        ),
+
+        lineage_trace AS (
+          -- === ANCHOR MEMBER (Level 1) ===
+          SELECT
+            1 AS depth,
+            lnk.q_id,
+            lnk.s_id,
+            lnk.target_database_name,
+            lnk.target_schema_name,
+            lnk.target_table_name,
+            lnk.target_column_name,
+            lnk.inferred_logic_detail,
+            lnk.transformation_logic,
+            lnk.source_database_name,
+            lnk.source_schema_name,
+            lnk.source_table_name,
+            lnk.source_column_name,
+            lnk.source_type,
+            -- This path array is still used to prevent infinite loops
+            [
+              COALESCE(lnk.target_database_name, '') || '.' ||
+              COALESCE(lnk.target_table_name, '') || '.' ||
+              COALESCE(lnk.target_column_name, '')
+            ] AS trace_path,
+            
+            -- *** MODIFICATION 1: Create an array to store the full path ***
+            -- We store both the target and the first source as STRUCTs
+            [
+              STRUCT(
+                lnk.target_database_name AS db,
+                lnk.target_schema_name AS schema,
+                lnk.target_table_name AS tbl,
+                lnk.target_column_name AS col,
+                lnk.transformation_logic AS logic
+              ),
+              STRUCT(
+                lnk.source_database_name AS db,
+                lnk.source_schema_name AS schema,
+                lnk.source_table_name AS tbl,
+                lnk.source_column_name AS col,
+                CAST(NULL AS STRING) AS logic -- Source columns don't have incoming logic
+              )
+            ] AS full_path_hops
+
+          FROM
+            all_column_links AS lnk
+          JOIN
+            selected_tables AS s
+            ON lnk.target_database_name = s.target_database_name
+            AND lnk.target_table_name = s.target_table_name
+            AND lnk.target_schema_name IS NOT DISTINCT FROM s.target_schema_name
+
+          UNION ALL
+
+          -- === RECURSIVE MEMBER (Level 2+) ===
+          SELECT
+            prev_hop.depth + 1,
+            next_hop.q_id,
+            next_hop.s_id,
+            next_hop.target_database_name,
+            next_hop.target_schema_name,
+            next_hop.target_table_name,
+            next_hop.target_column_name,
+            next_hop.inferred_logic_detail,
+            next_hop.transformation_logic,
+            next_hop.source_database_name,
+            next_hop.source_schema_name,
+            next_hop.source_table_name,
+            next_hop.source_column_name,
+            next_hop.source_type,
+            -- Add the current hop to our cycle-detection path
+            ARRAY_CONCAT(
+              prev_hop.trace_path,
+              [
+                COALESCE(next_hop.target_database_name, '') || '.' ||
+                COALESCE(next_hop.target_table_name, '') || '.' ||
+                COALESCE(next_hop.target_column_name, '')
+              ]
+            ) AS trace_path,
+
+            -- *** MODIFICATION 2: Add the *new* source to the path array ***
+            ARRAY_CONCAT(
+              prev_hop.full_path_hops,
+              [
+                STRUCT(
+                  next_hop.source_database_name AS db,
+                  next_hop.source_schema_name AS schema,
+                  next_hop.source_table_name AS tbl,
+                  next_hop.source_column_name AS col,
+                  CAST(NULL AS STRING) AS logic
+                )
+              ]
+            ) AS full_path_hops
+
+          FROM
+            all_column_links AS next_hop
+          JOIN
+            lineage_trace AS prev_hop
+            -- This is the "HOP"
+            ON next_hop.target_database_name = prev_hop.source_database_name
+            AND next_hop.target_table_name = prev_hop.source_table_name
+            AND next_hop.target_column_name = prev_hop.source_column_name
+            AND next_hop.target_schema_name IS NOT DISTINCT FROM prev_hop.source_schema_name
+          WHERE
+            -- Cycle Prevention
+            (
+              COALESCE(next_hop.target_database_name, '') || '.' ||
+              COALESCE(next_hop.target_table_name, '') || '.' ||
+              COALESCE(next_hop.target_column_name, '')
+            )
+            NOT IN UNNEST(prev_hop.trace_path)
+        )
+
+    /*
+    Step 3: *** MODIFIED FINAL SELECT ***
+    Select only the *ends* of the paths and show the full aggregated path.
+    */
+    SELECT
+      lt.q_id,
+      -- The first element in our array is the final target
+      full_path_hops[OFFSET(0)].db AS final_target_database_name,
+      full_path_hops[OFFSET(0)].tbl AS final_target_table,
+      full_path_hops[OFFSET(0)].col AS final_target_column,
+      full_path_hops[OFFSET(0)].logic AS final_target_transformation_logic,
+
+      -- The last element is the ultimate source
+      full_path_hops[ARRAY_LENGTH(full_path_hops) - 1].db AS ultimate_source_database_name,
+      full_path_hops[ARRAY_LENGTH(full_path_hops) - 1].tbl AS ultimate_source_table,
+      full_path_hops[ARRAY_LENGTH(full_path_hops) - 1].col AS ultimate_source_column,
+      
+      lt.depth AS max_depth,
+      lt.inferred_logic_detail,
+      
+      -- *** NEW: A human-readable string path ***
+      (
+        SELECT STRING_AGG(
+            COALESCE(hop.tbl, hop.db, '.') || '.' || COALESCE(hop.col, '.'),
+            '  <--  ' -- Use arrows to show data flow
+            ORDER BY hop_index -- This lists them C <-- B <-- A
+        )
+        FROM UNNEST(lt.full_path_hops) AS hop WITH OFFSET hop_index
+      ) AS lineage_path_string,
+
+      -- This column contains all details if you need them in a nested table
+      lt.full_path_hops
+
+    FROM
+      lineage_trace AS lt
+    WHERE
+      -- *** MODIFICATION 3: Filter for "end-of-path" rows only ***
+      -- This selects only the rows where the source is a "leaf" (i.e., it's not a target for any other link)
+      NOT EXISTS (
+        SELECT 1
+        FROM all_column_links AS next_link
+        WHERE next_link.target_database_name IS NOT DISTINCT FROM lt.source_database_name
+          AND next_link.target_schema_name IS NOT DISTINCT FROM lt.source_schema_name
+          AND next_link.target_table_name IS NOT DISTINCT FROM lt.source_table_name
+          AND next_link.target_column_name IS NOT DISTINCT FROM lt.source_column_name
+      )
+      -- Also include rows where the trace just stopped (source is NULL)
+      OR lt.source_column_name IS NULL
+    ORDER BY
+      final_target_table,
+      final_target_column,
+      max_depth;
+    """
+
+    struct_type = bigquery.StructQueryParameterType(
+        bigquery.ScalarQueryParameterType('STRING', name='target_database_name'),
+        bigquery.ScalarQueryParameterType('STRING', name='target_schema_name'),
+        bigquery.ScalarQueryParameterType('STRING', name='target_table_name')
+    )
+
+    selected_tables_param = bigquery.ArrayQueryParameter(
+        'selected_target_tables',
+        struct_type,
+        struct_query_params
+    )
+
+    qids_param = bigquery.ArrayQueryParameter(
+        'selected_qids',
+        'STRING',
+        selected_qids
+    )
+
+    job_config = bigquery.QueryJobConfig(
+        query_parameters=[selected_tables_param, qids_param]
+    )
+
+    try:
+        return client.query(query, job_config=job_config).to_dataframe()
+    except Exception as e:
+        st.error(f"Could not fetch detailed lineage: {e}")
+        return pd.DataFrame()
+
+@st.cache_data(ttl=3600)
 def get_all_source_tables() -> pd.DataFrame:
     """Fetches all distinct source tables from the statement_sources table."""
     client = get_bq_client()

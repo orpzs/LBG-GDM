@@ -13,9 +13,18 @@ from utils.bq_utils import (
     get_all_sql_extracts,
     get_tables_for_qid,
     get_recursive_lineage_for_tables,
+    get_detailed_lineage_for_tables,
 )
 
 st.set_page_config(layout="wide")
+
+
+def format_lineage_path(path_string):
+    """Reverses the lineage path for better readability."""
+    if isinstance(path_string, str) and "<--" in path_string:
+        return " ⟶ ".join(reversed(path_string.split(" <-- ")))
+    return path_string
+
 
 col1, col2 = st.columns([0.9, 0.1])
 with col1:
@@ -230,6 +239,8 @@ if st.session_state.get('show_tables', False):
             selected_qids = st.session_state.get("selected_qids", [])
             # Get column lineage for selected statements
             lineage_trace_df = get_recursive_lineage_for_tables(selected_target_tables_list, selected_qids)
+            detailed_lineage_df = get_detailed_lineage_for_tables(selected_target_tables_list, selected_qids)
+
             if not lineage_trace_df.empty:
                 st.header("End-to-End Column Lineage")
 
@@ -245,11 +256,9 @@ if st.session_state.get('show_tables', False):
 
                 # 2. Data for Detailed View Tab (Full Lineage)
                 # We will display the full lineage trace, including intermediate tables.
-                lineage_df_copy = lineage_trace_df.copy()
-                
-                # Merge file_name into the lineage trace
+                # Merge file_name into the detailed lineage trace
                 display_df = pd.merge(
-                    lineage_df_copy,
+                    detailed_lineage_df.copy(),
                     extracts_df[['q_id', 'file_name']],
                     on='q_id',
                     how='left'
@@ -259,9 +268,22 @@ if st.session_state.get('show_tables', False):
                 if 'q_id' in display_df.columns:
                     display_df = display_df.drop(columns=['q_id'])
 
+                # Convert unhashable columns to string before dropping duplicates
+                if 'full_path_hops' in display_df.columns:
+                    # The 'full_path_hops' column contains lists of dictionaries, which are not hashable.
+                    # We convert it to a string representation to allow for deduplication.
+                    display_df['full_path_hops'] = display_df['full_path_hops'].apply(str)
+
+                # Remove duplicate rows from the DataFrame
+                display_df.drop_duplicates(inplace=True)
+
                 # Sort the data for better readability
-                display_df = display_df.sort_values(by=["target_table_name", "target_column"])
+                display_df = display_df.sort_values(by=["final_target_table", "final_target_column"])
                 
+                # Format lineage path for better readability
+                if "lineage_path_string" in display_df.columns:
+                    display_df["lineage_path_string"] = display_df["lineage_path_string"].apply(format_lineage_path)
+
                 # Data for download
                 expanded_lineage_for_display = display_df
 
@@ -284,9 +306,16 @@ if st.session_state.get('show_tables', False):
                         # Define columns to display
                         cols_to_display = [
                             "file_name",
-                            "target_database_name",  "target_table_name", "target_column",
-                            "source_database_name",  "source_table_name", "source_column","inferred_logic_detail",
-                            "transformation_logic"
+                            "final_target_database_name",
+                            "final_target_table",
+                            "final_target_column",
+                            "final_target_transformation_logic",
+                            "ultimate_source_database_name",
+                            "ultimate_source_table",
+                            "ultimate_source_column",
+                            "inferred_logic_detail",
+                            "lineage_path_string",
+                            "max_depth",
                         ]
                         
                         # Create a list of columns that exist in the dataframe
@@ -295,17 +324,16 @@ if st.session_state.get('show_tables', False):
                         # Create a mapping for renaming
                         rename_map = {
                             "file_name": "File Name",
-                            "target_database_name": "Target DB",
-                            # "target_schema_name": "Target Schema",
-                            "target_table_name": "Target Table",
-                            "target_column": "Target Column",
-                            "source_database_name": "Source DB",
-                            # "source_schema_name": "Source Schema",
-                            "source_table_name": "Source Table",
-                            "source_column": "Source Column",
+                            "final_target_database_name": "Target DB",
+                            "final_target_table": "Target Table",
+                            "final_target_column": "Target Column",
+                            "ultimate_source_database_name": "Source DB",
+                            "ultimate_source_table": "Source Table",
+                            "ultimate_source_column": "Source Column",
+                            "final_target_transformation_logic": "Transformation Logic",
                             "inferred_logic_detail": "Inferred Logic",
-                            "transformation_logic": "Logic",
-                            
+                            "lineage_path_string": "Lineage Path",
+                            "max_depth": "Depth",
                         }
                         
                         # Rename the columns that exist
