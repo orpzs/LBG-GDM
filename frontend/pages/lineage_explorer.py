@@ -305,16 +305,17 @@ if st.session_state.get('show_tables', False):
                     if not display_df.empty:
                         # Define columns to display
                         cols_to_display = [
-                            "file_name",
+                            
                             "final_target_database_name",
                             "final_target_table",
                             "final_target_column",
-                            "final_target_transformation_logic",
                             "ultimate_source_database_name",
                             "ultimate_source_table",
                             "ultimate_source_column",
-                            "inferred_logic_detail",
                             "lineage_path_string",
+                            "final_target_transformation_logic",
+                            "inferred_logic_detail",                         
+                            "file_name",
                             "max_depth",
                         ]
                         
@@ -322,17 +323,17 @@ if st.session_state.get('show_tables', False):
                         existing_cols_original_names = [col for col in cols_to_display if col in display_df.columns]
                         
                         # Create a mapping for renaming
-                        rename_map = {
-                            "file_name": "File Name",
+                        rename_map = {                            
                             "final_target_database_name": "Target DB",
                             "final_target_table": "Target Table",
                             "final_target_column": "Target Column",
                             "ultimate_source_database_name": "Source DB",
                             "ultimate_source_table": "Source Table",
                             "ultimate_source_column": "Source Column",
-                            "final_target_transformation_logic": "Transformation Logic",
-                            "inferred_logic_detail": "Inferred Logic",
                             "lineage_path_string": "Lineage Path",
+                            "final_target_transformation_logic": "Transformation Logic",
+                            "inferred_logic_detail": "Inferred Logic",                            
+                            "file_name": "File Name",
                             "max_depth": "Depth",
                         }
                         

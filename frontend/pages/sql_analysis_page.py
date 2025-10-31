@@ -41,7 +41,15 @@ def get_q_id(file_name):
     return hashlib.sha256(file_name.encode()).hexdigest()
 
 def remove_duplicates(dict_list):
-    return [json.loads(s) for s in {json.dumps(d, sort_keys=True) for d in dict_list}]
+    seen = set()
+    unique_list = []
+    for d in dict_list:
+        # Convert dict to a string to make it hashable
+        s = json.dumps(d, sort_keys=True)
+        if s not in seen:
+            seen.add(s)
+            unique_list.append(d)
+    return unique_list
 
 def parse_and_load_data():
     parser_output = st.session_state.parser_output
@@ -180,24 +188,21 @@ def handle_analysis(uploaded_file):
             extract = get_sql_extract(sanitized_name)
             if extract:
                 st.session_state.processing_status = extract.get("processing_status")
-                parser_output_str = extract.get("parser_output")
-                loaded_output = None
-                try:
-                    loaded_output = json.loads(parser_output_str)
-                    if isinstance(loaded_output, str):
-                        loaded_output = json.loads(loaded_output)
-                except (json.JSONDecodeError, TypeError):
-                    loaded_output = parser_output_str # Keep as string if parsing fails
-
-                if st.session_state.processing_status == "ERROR":
-                    if isinstance(loaded_output, dict):
-                        st.session_state.error = loaded_output.get("error", "Unknown error")
-                    else:
-                        st.session_state.error = str(loaded_output)
-                else:
+                if st.session_state.processing_status != "ERROR":
+                    parser_output_str = extract.get("parser_output")
+                    loaded_output = None
+                    try:
+                        loaded_output = json.loads(parser_output_str)
+                        if isinstance(loaded_output, str):
+                            loaded_output = json.loads(loaded_output)
+                    except (json.JSONDecodeError, TypeError):
+                        loaded_output = parser_output_str # Keep as string if parsing fails
+                    
                     st.session_state.parser_output = loaded_output
-                st.session_state.analysis_running = False
-                return
+                    st.session_state.analysis_running = False
+                    return
+                else:
+                    st.info(f"Previous analysis of {sanitized_name} failed. Starting a new analysis.")
 
         # Insert placeholder to prevent race conditions
         with st.spinner(f"Initiating analysis for {sanitized_name}..."):
@@ -238,7 +243,6 @@ def handle_reanalysis():
     try:
         with st.spinner(f"Deleting existing analysis data for {st.session_state.uploaded_file_name}..."):
             delete_analysis_data(st.session_state.q_id)
-            st.session_state.processing_status = "NEW"
 
         with st.spinner(f"Performing new analysis of {st.session_state.uploaded_file_name}..."):
             uploaded_file = st.session_state.uploaded_file
@@ -250,9 +254,12 @@ def handle_reanalysis():
             
             for _ in range(3):
                 extract = get_sql_extract(st.session_state.uploaded_file_name)
-                if extract and extract.get("processing_status") == "NEW":
-                    st.session_state.parser_output = json.loads(extract.get("parser_output"))
+                if extract:
                     st.session_state.processing_status = extract.get("processing_status")
+                    if st.session_state.processing_status == "ERROR":
+                        st.session_state.error = json.loads(extract.get("parser_output")).get("error")
+                    elif st.session_state.processing_status != "PARSING":
+                        st.session_state.parser_output = json.loads(extract.get("parser_output"))
                     st.session_state.analysis_running = False
                     return
                 time.sleep(2)

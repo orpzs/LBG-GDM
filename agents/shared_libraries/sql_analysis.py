@@ -67,7 +67,7 @@ Instructions:
   - Each item in the statements list represents one DML operation you found, in sequential order.
   - Throughout your entire response, you must resolve all table aliases (e.g., `T1`, `A`, `B`) back to their full, original table names database.table_name for the transformation logics.
   - Always resolve the SELECT * as well. if the DDL is present in the script resolve each of the column if not 
-  - **You to need uppercase all the relevant query responses like Column name, transformation logic etc.** 
+  - **You to need uppercase all the relevant SQL statement related data like Column name, transformation logic expect inferred logic details**
 
 Core Logic: Handling the SELECT part of a DML (Flattening Lineage)
 
@@ -92,6 +92,8 @@ Core Logic: Handling UNION / UNION ALL. When the DML's SELECT statement contains
   - Branching Lineage: The column_lineage is where the UNION logic becomes visible. For a single output_column_name, transformation logic should be fully resolves but use the inferred_logic_detail to provide full detail with whole understanding of the statement with UNION itself.
 
 If the SQL script is invalid or contains no DML, return an empty JSON object: {{}}
+
+**ALways be consistent with the JSON key name mentioned in the below format** 
 
 Output JSON:
 
