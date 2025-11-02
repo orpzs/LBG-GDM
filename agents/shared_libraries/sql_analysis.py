@@ -184,9 +184,9 @@ JSON
        SQL:
             {sql_query.replace("{","{{").replace("}","}}")}
 """
-            
+        
         generation_config = {
-            "max_output_tokens": 8192,
+            "max_output_tokens": 65536,
             "temperature": 1,
             "top_p": 0.9,
         }
@@ -200,8 +200,10 @@ JSON
         print("Completed Extraction")
         try:
             # Validate JSON
+            print(response_text)
             parser_output = json.loads(response_text)
             processing_status = "NEW"
+            print("JSON is valid")
         except json.JSONDecodeError:
             print("Invalid JSON response from model")
             parser_output = {{"error": "Invalid JSON response from model", "response_text": response_text}}

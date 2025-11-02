@@ -41,13 +41,20 @@ def get_q_id(file_name):
     return hashlib.sha256(file_name.encode()).hexdigest()
 
 def remove_duplicates(dict_list):
+    if not isinstance(dict_list, list):
+        return []
     seen = set()
     unique_list = []
     for d in dict_list:
-        # Convert dict to a string to make it hashable
-        s = json.dumps(d, sort_keys=True)
-        if s not in seen:
-            seen.add(s)
+        if not isinstance(d, dict):
+            unique_list.append(d)
+            continue
+        try:
+            s = json.dumps(d, sort_keys=True)
+            if s not in seen:
+                seen.add(s)
+                unique_list.append(d)
+        except TypeError:
             unique_list.append(d)
     return unique_list
 

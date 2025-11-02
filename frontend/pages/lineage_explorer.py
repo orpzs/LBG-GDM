@@ -37,11 +37,11 @@ with col2:
 # Custom CSS for the green button
 st.markdown("""
 <style>
-    .stButton>button {
+    .stButton>button, div[data-testid="stForm"] button {
         background-color: #006A4D;
         color: white;
     }
-    .stButton>button:disabled {
+    .stButton>button:disabled, div[data-testid="stForm"] button:disabled {
         background-color: #F4F4F4;
         color: #A9A9A9;
     }
@@ -166,6 +166,7 @@ edited_df = st.data_editor(
 if st.button("Trace", key="trace_files", use_container_width=True):
     selected_files_df = edited_df[edited_df["Select"]]
     st.session_state.show_tables = False  # Reset on button click
+    st.session_state.run_lineage = False
 
     if not selected_files_df.empty:
         selected_qids = selected_files_df["q_id"].tolist()
@@ -196,7 +197,6 @@ if st.session_state.get('show_tables', False):
             "target_table_name": "Table Name",
             "inferred_target_type": "Type"
         }
-        disabled_columns = ["File Name", "Table Name", "Schema", "Database", "Type"]
     else:
         column_order = ("Select", "File Name", "Table Name", "Database", "Type")
         rename_columns = {
@@ -205,9 +205,8 @@ if st.session_state.get('show_tables', False):
             "target_table_name": "Table Name",
             "inferred_target_type": "Type"
         }
-        disabled_columns = ["File Name", "Table Name", "Database", "Type"]
 
-    edited_tables_df = st.data_editor(
+    edited_df = st.data_editor(
         st.session_state.target_tables_df.rename(columns=rename_columns),
         use_container_width=True,
         hide_index=True,
@@ -219,17 +218,25 @@ if st.session_state.get('show_tables', False):
                 width="small"
             )
         },
-        disabled=disabled_columns,
-        key="tables_editor"
+        disabled=[col for col in column_order if col != "Select"],
+        key="target_table_editor"
     )
 
-    st.session_state.target_tables_df['Select'] = edited_tables_df['Select']
+    if st.button("Track Column Lineage", use_container_width=True):
+        # Create a mapping from the displayed columns back to the original column names
+        reverse_rename_map = {v: k for k, v in rename_columns.items()}
+        
+        # Get the selection status from the edited dataframe
+        selections = edited_df['Select']
+        
+        # Update the 'Select' column in the original session state dataframe
+        st.session_state.target_tables_df['Select'] = selections.values
+        st.session_state.run_lineage = True
 
-    selected_target_tables_df = st.session_state.target_tables_df[st.session_state.target_tables_df['Select']]
+    if st.session_state.get('run_lineage', False):
+        selected_target_tables_df = st.session_state.target_tables_df[st.session_state.target_tables_df['Select']]
 
-    if not selected_target_tables_df.empty:
-        if st.button("Track Column Lineage", key="track_columns", use_container_width=True):
-            
+        if not selected_target_tables_df.empty:
             selected_target_tables_list = selected_target_tables_df[[
                 "target_database_name",
                 "target_schema_name",
@@ -361,3 +368,5 @@ if st.session_state.get('show_tables', False):
 
             else:
                 st.warning("No lineage trace found.")
+        else:
+            st.info("Select one or more tables and click 'Track Column Lineage' to see the results.")
